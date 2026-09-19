@@ -1,7 +1,4 @@
-// ---------- State (task logic unchanged) ----------
-// history = every task ever crossed off (kept after the row is deleted),
-// so the gear screen can list them, not just count them.
-let state = { threads: [], stats: { listed: 0, done: 0 }, history: [] };
+// ---------- Task store: state machine lives in taskStore.js ----------
 let lastAddedId = null;
 const shell = document.getElementById('shell');
 const panel = document.getElementById('panel');   // row that gets the pop-in animation
@@ -9,141 +6,14 @@ const panel = document.getElementById('panel');   // row that gets the pop-in an
 // Shared between the orb row and the axis renderer.
 let hoveredId = null;
 
-const COLORS = { 1: '#e15656', 2: '#4a86e8', 3: '#e0b23e', 4: '#9aa0a8' };
-const byCreated = (a, b) => a.createdAt - b.createdAt;
-// Open threads: what the blob shows, and the only threads the axis draws.
-// A thread leaves both the instant it's crossed off — closed work never
-// crowds the axis; it only lives on (struck through) in the list below.
-const activeThreads = () =>
-  state.threads.filter((t) => t.status === 'axis' || t.status === 'resolving').sort(byCreated);
-
-async function loadState() {
-  const saved = await window.threadAxis.loadThreads();
-  if (saved && Array.isArray(saved.threads)) {
-    state.threads = saved.threads;
-    // Lifetime scoreboard. Older files have no stats: seed from what's on disk.
-    state.stats = saved.stats || {
-      listed: saved.threads.length,
-      done: saved.threads.filter((t) => t.status === 'done').length,
-    };
-    // Older files have no history: seed it from the done rows still on disk.
-    state.history = Array.isArray(saved.history)
-      ? saved.history
-      : saved.threads.filter((t) => t.status === 'done').map(toHistory);
-  }
-  render();
-}
-
-function persist() {
-  const clean = {
-    ...state,
-    threads: state.threads.map(({ retagging, ...t }) => t),
-  };
-  window.threadAxis.saveThreads(clean);
-}
-
-// Capture first, tag after. A new task is untagged (quad null) and
-// sits in the list; it only becomes a thread once it gets a Q.
-function addTask(text) {
-  const id = Date.now().toString(36);
-  state.threads.push({
-    id,
-    text,
-    quad: null,
-    status: 'dump',
-    createdAt: Date.now(),
-  });
-  lastAddedId = id;
-  state.stats.listed++;
-  persist();
-  render();
-}
-
-// Tagging never moves a thread by itself — Q1..Q4 is only ever a label
-// (the paper's point: the tag sets *order*, not placement). Moving between
-// the dump and the axis is always an explicit act: dispatchToAxis /
-// recallToDump below, wired to the row's →/← buttons. Retagging works the
-// same way regardless of where the thread currently sits.
-function tagTask(id, quad) {
-  const t = state.threads.find((x) => x.id === id);
-  if (!t || t.status === 'resolving' || t.status === 'done') return;
-  t.quad = quad;
-  t.retagging = false;
-  persist();
-  render();
-}
-
-// Dump → axis. Any tagged thread can be pushed over at any quad — the tag
-// only ever set order (see tagTask above).
-function dispatchToAxis(id) {
-  const t = state.threads.find((x) => x.id === id);
-  if (!t || t.status !== 'dump') return;
-  t.status = 'axis';
-  persist();
-  render();
-}
-
-// Axis → dump. The mirror of dispatchToAxis: for a thread you tagged and
-// pushed over but aren't actually working yet. Nothing is lost — same tag,
-// same row, just off the axis until you push it again.
-function recallToDump(id) {
-  const t = state.threads.find((x) => x.id === id);
-  if (!t || t.status !== 'axis') return;
-  t.status = 'dump';
-  delete t.focused;
-  persist();
-  render();
-}
-
-function resolveThread(id) {
-  const t = state.threads.find((x) => x.id === id);
-  if (!t) return;
-  t.status = 'resolving';
-  render();
-  setTimeout(() => {
-    t.status = 'done';
-    t.doneAt = Date.now();
-    delete t.focused;
-    state.stats.done++;
-    state.history.push(toHistory(t));
-    persist();
-    render();
-  }, 700);
-}
-
-const toHistory = ({ id, text, quad, createdAt, doneAt }) => ({ id, text, quad, createdAt, doneAt });
-
-// Undo a cross-off: the thread goes straight back on the axis (that is
-// where it was when it got closed) and the scoreboard gives the point back.
-function reopenTask(id) {
-  const t = state.threads.find((x) => x.id === id);
-  if (!t || t.status !== 'done') return;
-  t.status = 'axis';
-  delete t.doneAt;
-  state.stats.done = Math.max(0, state.stats.done - 1);
-  state.history = state.history.filter((h) => h.id !== id);
-  persist();
-  render();
-}
-
-function deleteTask(id) {
-  state.threads = state.threads.filter((x) => x.id !== id);
-  if (hoveredId === id) hoveredId = null;
-  persist();
-  render();
-}
-
-// Click an orb: single persistent focus (stored in threads.json).
-// Clicking the focused orb again clears it.
-function toggleFocus(id) {
-  const t = state.threads.find((x) => x.id === id);
-  if (!t || t.status !== 'axis') return;
-  const wasFocused = !!t.focused;
-  state.threads.forEach((x) => { delete x.focused; });
-  if (!wasFocused) t.focused = true;
-  persist();
-  render();
-}
+// taskStore.js owns { threads, stats, history } and every transition on
+// them; this file only renders that state and wires up the DOM. Persistence
+// (window.threadAxis, the preload.js IPC bridge) and onChange (render) are
+// injected so the store itself never touches Electron or the DOM — see
+// taskStore.js. `state` stays a live reference into the store (not a copy),
+// so reading state.threads etc. here always sees the current data.
+const store = createTaskStore(window.threadAxis, render);
+const { state, COLORS, activeThreads } = store;
 
 // ---------- Scoreboard ----------
 function renderScore() {
@@ -382,7 +252,7 @@ function renderAxis() {
       g = svgEl('g');
       g.dataset.id = t.id;
       g.style.cursor = 'pointer';
-      g.addEventListener('click', () => { if (t.status === 'axis') resolveThread(t.id); });
+      g.addEventListener('click', () => { if (t.status === 'axis') store.resolveThread(t.id); });
       g.addEventListener('mouseenter', () => setHovered(t.id));
       g.addEventListener('mouseleave', () => setHovered(null));
       // Start at its slot with no transition, then pop up from the baseline.
@@ -409,7 +279,7 @@ function tagDots(t) {
     d.textContent = `Q${q}`;
     d.title = `Tag Q${q}`;
     d.style.setProperty('--c', COLORS[q]);
-    d.onclick = (e) => { e.stopPropagation(); tagTask(t.id, q); };
+    d.onclick = (e) => { e.stopPropagation(); store.tagTask(t.id, q); };
     dots.appendChild(d);
   });
   return dots;
@@ -438,7 +308,7 @@ function renderList() {
     text.className = 'task-text';
     text.textContent = t.text;
     text.title = t.status === 'axis' ? 'Click to focus this thread' : t.text;
-    text.onclick = () => { if (t.status === 'axis') toggleFocus(t.id); };
+    text.onclick = () => { if (t.status === 'axis') store.toggleFocus(t.id); };
     row.appendChild(text);
     if (t.status !== 'dump') {
       row.addEventListener('mouseenter', () => setHovered(t.id));
@@ -471,28 +341,28 @@ function renderList() {
       undo.className = 'task-act undo';
       undo.textContent = '↺';
       undo.title = 'Reopen (undo cross-off)';
-      undo.onclick = (e) => { e.stopPropagation(); reopenTask(t.id); };
+      undo.onclick = (e) => { e.stopPropagation(); store.reopenTask(t.id); };
       row.appendChild(undo);
     } else if (t.status === 'axis') {
       const recall = document.createElement('button');
       recall.className = 'task-act recall';
       recall.textContent = '←';
       recall.title = 'Not working on this yet — send back to the dump';
-      recall.onclick = (e) => { e.stopPropagation(); recallToDump(t.id); };
+      recall.onclick = (e) => { e.stopPropagation(); store.recallToDump(t.id); };
       row.appendChild(recall);
 
       const done = document.createElement('button');
       done.className = 'task-act done';
       done.textContent = '✓';
       done.title = 'Close this thread';
-      done.onclick = (e) => { e.stopPropagation(); resolveThread(t.id); };
+      done.onclick = (e) => { e.stopPropagation(); store.resolveThread(t.id); };
       row.appendChild(done);
     } else if (t.status === 'dump' && t.quad != null) {
       const push = document.createElement('button');
       push.className = 'task-act push';
       push.textContent = '→';
       push.title = 'Put on the axis';
-      push.onclick = (e) => { e.stopPropagation(); dispatchToAxis(t.id); };
+      push.onclick = (e) => { e.stopPropagation(); store.dispatchToAxis(t.id); };
       row.appendChild(push);
     }
 
@@ -513,12 +383,16 @@ function showRowMenu(x, y, t) {
     const undo = document.createElement('button');
     undo.className = 'reopen';
     undo.textContent = 'Reopen';
-    undo.onclick = () => { hideRowMenu(); reopenTask(t.id); };
+    undo.onclick = () => { hideRowMenu(); store.reopenTask(t.id); };
     rowMenu.appendChild(undo);
   }
   const del = document.createElement('button');
   del.textContent = `Delete "${t.text.length > 24 ? t.text.slice(0, 23) + '…' : t.text}"`;
-  del.onclick = () => { hideRowMenu(); deleteTask(t.id); };
+  del.onclick = () => {
+    hideRowMenu();
+    if (hoveredId === t.id) hoveredId = null; // renderer-local hover state; the store doesn't know about it
+    store.deleteTask(t.id);
+  };
   rowMenu.appendChild(del);
   rowMenu.style.display = 'block';
   const s = shell.getBoundingClientRect();
@@ -643,7 +517,12 @@ document.addEventListener('keydown', (e) => {
 // ---------- Wiring (unchanged) ----------
 document.getElementById('taskInput').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && e.target.value.trim()) {
-    addTask(e.target.value.trim());
+    // addTask() already renders once (via the store's onChange) before this
+    // line runs, so lastAddedId isn't set yet for that pass — re-render the
+    // list right after so the new row still gets its "fresh" highlight and
+    // the list still scrolls to it, exactly as before the extraction.
+    lastAddedId = store.addTask(e.target.value.trim());
+    renderList();
     e.target.value = '';
   }
 });
@@ -660,4 +539,4 @@ loginToggle.addEventListener('change', async () => {
   loginToggle.checked = !!(await window.threadAxis.setLoginItem(loginToggle.checked));
 });
 
-loadState();
+store.loadState();

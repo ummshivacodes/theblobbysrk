@@ -18,6 +18,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "taskStore.js",
       "renderer.js",
       "index.html",
       "style.css",
