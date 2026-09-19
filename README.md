@@ -76,17 +76,60 @@ npm start
 
 Change the hotkey by editing `HOTKEY` at the top of `main.js`.
 
+## Architecture
+Three layers, dependencies pointing one way (view → store):
+
+| File | Role | Knows about |
+|---|---|---|
+| `taskStore.js` | The task state machine: `threads`/`stats`/`history` and every transition (`addTask`, `tagTask`, `dispatchToAxis`, `recallToDump`, `resolveThread`, `reopenTask`, `deleteTask`, `toggleFocus`). | Nothing. No DOM, no Electron: persistence and a change callback are injected. |
+| `renderer.js` | The view: draws the blob, axis, list and gear screen from `store.state`; panel animation, window sizing, DOM wiring. | `taskStore.js` and the `window.threadAxis` bridge. |
+| `preload.js` | The only bridge between the page and Electron (IPC). | Electron. |
+| `main.js` | The OS shell: window, tray, hotkey, reading/writing `threads.json`, the debug/self-test hooks. | Electron, Node. |
+
+Rules that keep it rebuildable:
+- **Transitions live in `taskStore.js` only.** It guards each one, so an
+  impossible move (say, closing a thread that's in the dump) is a no-op.
+  The UI never sets `t.status` itself; it calls `store.*` and re-renders.
+- **One top-level name in `taskStore.js`.** `index.html` loads it and
+  `renderer.js` as classic scripts, which share a single global scope. A
+  second top-level `const COLORS` would stop `renderer.js` loading at all
+  ("Identifier … has already been declared"). Anything else goes inside
+  the `createTaskStore` factory.
+- **New source files must be listed in `build.files` in `package.json`.**
+  Otherwise the packaged app ships without them while `npm start` keeps
+  working, which is a nasty one to find.
+
+## Tests
+```
+npm test
+```
+Runs `test/taskStore.test.js`: plain Node, no Electron, about a second (one
+case waits out the 700 ms close animation). It drives the state machine
+against a fake in-memory persistence object and also guards the rules above
+(no DOM in the store, no global-name collisions with `renderer.js`). Change a
+transition, change its test.
+
 ## Debugging
 - `THREAD_AXIS_DEBUG=1 npm start` logs every window resize and forwards
   renderer console output to the terminal.
-- `THREAD_AXIS_SELFTEST=1 npm start` drives expand → add → close → gear
-  screen → reopen → delete from the main process so the whole flow can be
+- `THREAD_AXIS_SELFTEST=1 npm start` drives expand → add → push to axis →
+  recall → close → gear screen → reopen → delete from the main process so the whole flow can be
   checked without a mouse. It cleans up after itself.
 - `THREAD_AXIS_SHOT=out.png [THREAD_AXIS_EVAL="js"] npm start` runs some
   JS in the renderer (default `openPanel()`), captures the window to a PNG
   and quits. E.g. `THREAD_AXIS_EVAL="openPanel(); setTimeout(() => showScreen('done'), 300)"`.
-- Both need the installed Blob quit first: it holds the single-instance
-  lock, so `npm start` just reveals it and exits silently.
+- Those need the installed Blob quit first: it holds the single-instance
+  lock, so a plain `npm start` just reveals it and exits silently. They
+  also run against your real `threads.json`.
+- **Isolated run** (no need to quit Blob, and your real tasks are never
+  touched): point the app at a scratch copy of the data and give it its own
+  profile, which gives it its own single-instance lock:
+  ```
+  cp ~/Library/Application\ Support/thread-axis/threads.json /tmp/blob-test.json
+  THREAD_AXIS_DATA=/tmp/blob-test.json THREAD_AXIS_SELFTEST=1 npx electron . --user-data-dir=/tmp/blob-test-profile
+  ```
+  The same two settings work on the packaged app
+  (`Blob.app/Contents/MacOS/Blob --user-data-dir=…`).
 
 ## macOS "malware" dialog
 Electron's prebuilt binary is only ad-hoc signed. If macOS ever shows

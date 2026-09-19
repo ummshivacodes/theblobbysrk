@@ -13,7 +13,10 @@ const DEBUG = process.env.THREAD_AXIS_DEBUG === '1';
 
 // Pinned to the original folder so the packaged "Blob" app and `npm start`
 // read the same file. (userData would otherwise follow the product name.)
-const dataPath = () => path.join(app.getPath('appData'), 'thread-axis', 'threads.json');
+// THREAD_AXIS_DATA=/some/file.json overrides it, so tests can run against a
+// scratch copy instead of your real tasks.
+const dataPath = () => process.env.THREAD_AXIS_DATA
+  || path.join(app.getPath('appData'), 'thread-axis', 'threads.json');
 
 let win;
 let tray;

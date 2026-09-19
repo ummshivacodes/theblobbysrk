@@ -5,6 +5,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "test": "node test/taskStore.test.js",
     "build": "electron-builder --mac --dir",
     "install-app": "npm run build && rm -rf /Applications/Blob.app && cp -R dist/mac-arm64/Blob.app /Applications/Blob.app && echo 'Installed /Applications/Blob.app'"
   },
