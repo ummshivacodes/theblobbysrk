@@ -1,0 +1,38 @@
+{
+  "name": "thread-axis",
+  "version": "1.0.0",
+  "description": "Blob: a floating desktop overlay implementing the Thread Axis Method",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --mac --dir",
+    "install-app": "npm run build && rm -rf /Applications/Blob.app && cp -R dist/mac-arm64/Blob.app /Applications/Blob.app && echo 'Installed /Applications/Blob.app'"
+  },
+  "build": {
+    "appId": "com.shiva.blob",
+    "productName": "Blob",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer.js",
+      "index.html",
+      "style.css",
+      "assets/**",
+      "package.json"
+    ],
+    "mac": {
+      "target": "dir",
+      "icon": "build/icon.icns",
+      "category": "public.app-category.productivity",
+      "identity": null
+    }
+  },
+  "devDependencies": {
+    "electron": "^44.4.2",
+    "electron-builder": "^26.15.3"
+  }
+}

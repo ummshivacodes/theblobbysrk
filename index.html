@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- The shell is the only thing the window ever needs to be as big as.
+       Collapsed = orb row. Expanded = orb row + panel below it. -->
+  <div id="shell" class="shell">
+    <div id="orbBar" class="orb-bar" aria-label="Blob"></div>
+    <div id="tooltip" class="tooltip" role="tooltip"></div>
+    <div id="rowMenu" class="row-menu"></div>
+
+    <div id="panel" class="panel">
+      <div class="panel-inner">
+        <div class="header" id="header">
+          <span class="title">Blob</span>
+          <span class="hotkey-hint">⌘⇧Y</span>
+          <div class="win-actions">
+            <button id="gearBtn" class="icon-btn gear" title="Crossed off &amp; settings">⚙</button>
+            <button id="hideBtn" class="icon-btn" title="Hide (⌘⇧Y, the menu bar blob, or the Dock icon brings it back)">–</button>
+            <button id="quitBtn" class="icon-btn" title="Quit">×</button>
+          </div>
+        </div>
+
+        <div id="mainScreen" class="screen active">
+        <div class="section-label">Active tasks <span id="axisCount">(0)</span></div>
+        <svg id="axisSvg" viewBox="0 0 300 120"></svg>
+
+        <div class="section-label">Task dump <span id="taskCount">(0)</span></div>
+        <div id="taskList" class="task-list"></div>
+
+        <div class="score-row">
+          <div class="score">Done <span id="doneCount">0</span>/<span id="listedCount">0</span></div>
+          <div class="score-sub"><span id="activeCount">0</span> active</div>
+        </div>
+
+        <div class="quick-add">
+          <input id="taskInput" type="text" placeholder="dump a task… (tag it after)" autofocus />
+        </div>
+        </div><!-- /mainScreen -->
+
+        <div id="doneScreen" class="screen">
+          <div class="done-head">
+            <span class="done-big" id="doneBig">0</span>
+            <span class="done-sub">crossed off · <span id="doneListed">0</span> listed</span>
+            <button id="backBtn" class="back-btn" title="Back (Esc)">← back</button>
+          </div>
+          <div class="section-label">Crossed off <span id="doneListCount">(0)</span></div>
+          <div id="doneList" class="task-list"></div>
+          <div class="section-label">Settings</div>
+          <label class="setting-row">
+            <span>Launch at login</span>
+            <input type="checkbox" id="loginToggle" />
+          </label>
+          <div class="setting-row muted"><span>Toggle Blob</span><span class="kbd">⌘⇧Y</span></div>
+        </div><!-- /doneScreen -->
+      </div>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

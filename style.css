@@ -1,0 +1,271 @@
+* { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
+
+/* Content hugs the top-right; the window is resized to match the shell. */
+body { display: flex; justify-content: flex-end; align-items: flex-start; }
+
+:root {
+  --q1: #e15656;
+  --q2: #4a86e8;
+  --q3: #e0b23e;
+  --q4: #9aa0a8;
+  --gold: #f2c14e;
+  --panel-w: 320px;
+  --shell-pad-x: 14px;
+  --shell-pad-top: 10px;
+  --shell-pad-bottom: 14px;
+}
+
+.shell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  padding: var(--shell-pad-top) var(--shell-pad-x) var(--shell-pad-bottom);
+}
+
+/* ---------- Ambient: orb row ---------- */
+.orb-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 4px;
+  -webkit-app-region: no-drag;
+}
+
+/* One glass blob for all threads; a coloured core dot per thread inside it. */
+.orb {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 6px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.28);
+  -webkit-backdrop-filter: blur(10px) saturate(160%);
+  backdrop-filter: blur(10px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.orb:hover { transform: scale(1.08); }
+.orb .core {
+  --c: #999;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c);
+  box-shadow: inset 0 -1px 1px rgba(0, 0, 0, 0.25);  /* flat dot, no glow: the bars carry the light */
+  transition: transform 0.15s ease, opacity 0.3s ease;
+}
+.orb .core.hovered { transform: scale(1.35); }
+.orb .core.resolving { opacity: 0.3; background: #8fd08f; }
+.orb .core.focused { outline: 1.5px solid var(--gold); outline-offset: 1px; }
+.orb.focused {
+  box-shadow: 0 0 0 2px var(--gold), 0 0 10px rgba(242, 193, 78, 0.75), 0 2px 8px rgba(0, 0, 0, 0.28);
+}
+.orb .more { font-size: 8px; font-weight: 700; color: rgba(0, 0, 0, 0.6); line-height: 8px; }
+.orb.ghost {
+  background: rgba(255, 255, 255, 0.12);
+  border: 1.5px dashed rgba(255, 255, 255, 0.6);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* ---------- Tooltip (under the hovered orb) ---------- */
+.tooltip {
+  position: absolute;
+  top: 50px;
+  z-index: 5;
+  max-width: 300px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  color: #fff;
+  background: rgba(18, 18, 22, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-3px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+.tooltip.show { opacity: 1; transform: translateY(0); }
+
+/* ---------- Expanded panel ---------- */
+.panel {
+  display: none;            /* JS flips to block before animating */
+  width: var(--panel-w);
+  height: 0;
+  margin-top: 6px;
+  overflow: hidden;
+  opacity: 0;
+  border-radius: 14px;
+  background: rgba(18, 18, 22, 0.94);
+  color: #eaeaea;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  transition: height 0.22s ease, opacity 0.18s ease;
+}
+.panel.open { opacity: 1; }
+
+/* Fixed inner height keeps measurement deterministic. */
+.panel-inner {
+  height: 420px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  -webkit-app-region: drag;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 8px;
+}
+.title { font-weight: 600; font-size: 13px; letter-spacing: 0.3px; }
+.hotkey-hint { font-size: 11px; opacity: 0.5; }
+.win-actions { -webkit-app-region: no-drag; display: flex; gap: 4px; }
+.icon-btn {
+  background: transparent; border: none; color: #ccc; font-size: 14px;
+  cursor: pointer; width: 20px; height: 20px; border-radius: 4px;
+}
+.icon-btn:hover { background: rgba(255, 255, 255, 0.1); }
+
+/* Entry box lives at the bottom; new rows appear directly above it. */
+.quick-add { margin-top: 6px; }
+.quick-add input {
+  width: 100%; padding: 7px 9px; border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.06); color: #fff; font-size: 12px;
+  outline: none;
+}
+.quick-add input:focus { border-color: rgba(255, 255, 255, 0.35); }
+
+.section-label {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+  opacity: 0.5; margin: 4px 0;
+}
+
+/* ---------- Axis (SVG) ---------- */
+#axisSvg { display: block; width: 100%; height: 120px; overflow: visible; }
+.thread-label { font-size: 9px; fill: #eaeaea; }
+.bar-g { transition: transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.bar-g .bar { transition: stroke-width 0.12s ease, opacity 0.12s ease; }
+.bar-g.hovered .bar { stroke-width: 7; filter: url(#raise) brightness(1.25); }
+.bar-g.hovered .thread-label { font-weight: 700; fill: #fff; }
+.bar-g .halo { stroke: var(--gold); opacity: 0.9; }
+.bar-g.fresh .bar, .bar-g.fresh .bar-sheen, .bar-g.fresh .thread-label { animation: bar-pop 0.32s cubic-bezier(0.2, 0.8, 0.2, 1); }
+@keyframes bar-pop {
+  from { transform: translateY(20px); opacity: 0; }
+  to   { transform: none; opacity: 1; }
+}
+
+/* ---------- Row context menu ---------- */
+.row-menu {
+  display: none;
+  position: absolute;
+  z-index: 10;
+  padding: 4px;
+  border-radius: 7px;
+  background: rgba(30, 30, 36, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+.row-menu button {
+  display: block; width: 100%; text-align: left; white-space: nowrap;
+  padding: 5px 10px; border-radius: 5px; border: none; cursor: pointer;
+  background: transparent; color: #f0a0a0; font-size: 11px;
+}
+.row-menu button:hover { background: rgba(225, 86, 86, 0.25); color: #fff; }
+
+/* ---------- Task list: one row per task, tag after capture ---------- */
+.task-list { flex: 1; min-height: 60px; overflow-y: auto; margin-bottom: 6px; }
+.task-row {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; padding: 4px 6px; border-radius: 5px; margin-bottom: 2px;
+  background: rgba(255, 255, 255, 0.04);
+  border-left: 2px solid transparent;
+}
+.task-row.focused { border-left-color: var(--gold); }
+.task-row.hovered { background: rgba(255, 255, 255, 0.1); }
+.task-text { cursor: pointer; }
+.task-row.resolving, .task-row.done { opacity: 0.45; }
+.task-row.resolving .task-text, .task-row.done .task-text { text-decoration: line-through; cursor: default; }
+.tag-chip.static { cursor: default; opacity: 0.7; }
+.task-row.fresh { animation: pop-in 0.18s ease-out; }
+@keyframes pop-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.task-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.tag-dots { display: flex; gap: 3px; }
+.tag-dot {
+  width: 19px; height: 19px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, 0.25);
+  background: transparent; color: rgba(255, 255, 255, 0.55);
+  font-size: 8px; font-weight: 700; cursor: pointer; padding: 0; line-height: 17px;
+}
+.tag-dot:hover { color: #fff; border-color: var(--c); background: var(--c); }
+.tag-chip {
+  min-width: 26px; padding: 1px 6px; border-radius: 4px; border: none;
+  font-size: 10px; font-weight: 700; cursor: pointer; background: var(--c); color: #fff;
+}
+.tag-chip.q3 { color: #222; }
+.task-act {
+  width: 20px; height: 18px; border-radius: 4px; border: none; padding: 0;
+  font-size: 11px; cursor: pointer; background: rgba(255, 255, 255, 0.08); color: #ddd;
+}
+.task-act.done:hover { background: #3a7; color: #fff; }
+.task-act.push:hover { background: #3a7; color: #fff; }
+.task-act.recall:hover { background: #e0b23e; color: #222; }
+
+.score-row {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.score { font-size: 12px; font-weight: 600; }
+.score #doneCount { color: #8fd08f; }
+.score #listedCount { opacity: 0.7; }
+.score-sub { font-size: 11px; opacity: 0.6; }
+
+/* ---------- Screens inside the panel (main / gear) ---------- */
+.screen { display: none; flex: 1; min-height: 0; flex-direction: column; }
+.screen.active { display: flex; }
+.icon-btn.gear { font-size: 13px; color: #aaa; }
+.icon-btn.gear.on { background: rgba(255, 255, 255, 0.14); color: #fff; }
+
+.done-head { display: flex; align-items: baseline; gap: 8px; padding: 2px 0 8px; }
+.done-big { font-size: 28px; font-weight: 700; color: #8fd08f; line-height: 1; }
+.done-sub { font-size: 11px; opacity: 0.6; flex: 1; }
+.back-btn {
+  background: transparent; border: none; color: #aaa; font-size: 11px; cursor: pointer;
+  padding: 2px 6px; border-radius: 4px;
+}
+.back-btn:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.task-row.history { opacity: 0.85; }
+.task-row.history .task-text { cursor: default; }
+.history-when { font-size: 10px; opacity: 0.5; white-space: nowrap; }
+.done-empty { font-size: 11px; opacity: 0.5; padding: 8px 6px; }
+
+.setting-row {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 12px; padding: 5px 6px; border-radius: 5px; margin-bottom: 2px;
+  background: rgba(255, 255, 255, 0.04); cursor: pointer;
+}
+.setting-row.muted { cursor: default; opacity: 0.6; }
+.setting-row input { accent-color: #8fd08f; margin: 0; }
+.kbd { font-size: 11px; opacity: 0.8; }
+
+/* ↺ on a crossed-off row */
+.task-act.undo { opacity: 0.8; }
+.task-act.undo:hover { background: #4a86e8; color: #fff; opacity: 1; }
+.task-row.done .task-act.undo { pointer-events: auto; }
+.row-menu button.reopen { color: #9cc4ff; }
+.row-menu button.reopen:hover { background: rgba(74, 134, 232, 0.25); color: #fff; }
