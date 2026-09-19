@@ -20,16 +20,30 @@ const dataPath = () => process.env.THREAD_AXIS_DATA
 
 let win;
 let tray;
+let quitting = false;   // set the moment a real quit starts; until then closing only hides
+let crashTimes = [];    // when the renderer died recently (see render-process-gone below)
+
+// The overlay is meant to live for the whole session, but never assume it
+// does: every call on a destroyed BrowserWindow throws "Object has been
+// destroyed", and the hotkey, tray, Dock and second-launch handlers all come
+// through here. Whatever is asked, a missing window is rebuilt first.
+const liveWindow = () => (win && !win.isDestroyed() ? win : null);
 
 function showWindow() {
-  if (!win) return;
+  if (quitting || !app.isReady()) return;  // mid-startup: the ready handler makes the window
+  if (!liveWindow()) createWindow();
   win.show();
   win.focus();
 }
 
+function hideWindow() {
+  const w = liveWindow();
+  if (w) w.hide();
+}
+
 function toggleWindow() {
-  if (!win) return;
-  if (win.isVisible()) win.hide();
+  const w = liveWindow();
+  if (w && w.isVisible()) w.hide();
   else showWindow();
 }
 
@@ -59,7 +73,9 @@ function createWindow() {
   // UI-element app to float over full-screen windows, which removes the
   // Dock icon. We want the Dock icon; the tray + hotkey cover full-screen.
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
-  win.loadFile('index.html');
+  // Absolute, so it doesn't depend on which script Electron was launched with
+  // (the lifecycle test launches test/lifecycle.electron.js and requires this file).
+  win.loadFile(path.join(__dirname, 'index.html'));
 
   if (DEBUG) {
     win.webContents.on('console-message', (ev) =>
@@ -107,6 +123,32 @@ function createWindow() {
   // open the panel with the input focused, or drop back to ambient.
   win.on('show', () => win.webContents.send('window-shown'));
   win.on('hide', () => win.webContents.send('window-hidden'));
+
+  // Closing hides. Electron's default app menu gives every window ⌘W ("Close
+  // Window"), and a destroyed window can't be brought back by the hotkey, the
+  // tray or the Dock. Only a real quit (× button, tray Quit, ⌘Q) lets it close.
+  win.on('close', (e) => {
+    if (quitting) return;
+    e.preventDefault();
+    win.hide();
+  });
+
+  // If the renderer dies (crash, out of memory, killed) the window would sit
+  // there blank for good. Everything is saved on every change, so reloading
+  // loses nothing. Give up if it keeps dying, so a crash that happens on every
+  // load can't spin forever.
+  win.webContents.on('render-process-gone', (e, details) => {
+    if (quitting || details.reason === 'clean-exit') return;
+    console.warn('[main] renderer gone:', details.reason);
+    const now = Date.now();
+    crashTimes = crashTimes.filter((t) => now - t < 60 * 1000);
+    crashTimes.push(now);
+    if (crashTimes.length > 3) {
+      console.error('[main] renderer keeps dying; not reloading again');
+      return;
+    }
+    if (!win.isDestroyed()) win.reload();
+  });
 }
 
 // One Blob at a time: launching it again just reveals the running one.
@@ -122,7 +164,7 @@ function createTray() {
   tray.setToolTip('Blob');
   const menu = Menu.buildFromTemplate([
     { label: 'Show Blob', click: showWindow },
-    { label: 'Hide Blob', click: () => win && win.hide() },
+    { label: 'Hide Blob', click: hideWindow },
     { type: 'separator' },
     { label: `Toggle: ${HOTKEY.replace('CommandOrControl', '⌘').replace('Shift', '⇧').replace(/\+/g, '')}`, enabled: false },
     { type: 'separator' },
@@ -143,12 +185,16 @@ app.whenReady().then(() => {
   }
 });
 
+// Fires first on every real quit (× button, tray Quit, ⌘Q, logout), which is
+// what lets the window's close handler stop hiding and actually close.
+app.on('before-quit', () => { quitting = true; });
+
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
 });
 
-// Frameless window has no OS close button, and hide() never fires this anyway.
-// Kept so the app behaves if you ever add one back.
+// Closing only hides (see the close handler), so this fires only while
+// quitting. Registered anyway so Electron never decides to quit on its own.
 app.on('window-all-closed', () => {});
 
 // Clicking the Dock icon brings the blob back.
@@ -172,7 +218,7 @@ ipcMain.handle('save-threads', (event, data) => {
 // the top-right corner where it is (so the orbs never jump on screen,
 // and a drag of the panel header is respected on the next resize).
 ipcMain.on('resize-window', (event, { width, height }) => {
-  if (!win) return;
+  if (!liveWindow()) return;
   const b = win.getBounds();
   const right = b.x + b.width;
   const w = Math.max(1, Math.min(MAX_WIDTH, Math.round(width)));
@@ -191,4 +237,4 @@ ipcMain.handle('set-login-item', (event, on) => {
 });
 
 ipcMain.on('quit-app', () => app.quit());
-ipcMain.on('hide-window', () => win && win.hide());
+ipcMain.on('hide-window', hideWindow);

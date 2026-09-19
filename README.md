@@ -26,8 +26,10 @@ npm start
   blob, right-click gives Show / Hide / Quit.
 - **Dock:** click the Blob icon.
 - **Hotkey:** `⌘⇧Y` from anywhere.
-- The "–" in the panel header only hides it; any of the above brings it back.
-  Launching Blob a second time just reveals the running one.
+- The "–" in the panel header, and ⌘W, only hide it; any of the above brings
+  it back. Launching Blob a second time just reveals the running one. If the
+  window is ever lost entirely, or its renderer dies, the same actions
+  rebuild it.
 
 ## How it sits on screen
 - **Ambient:** one glass blob in the top-right of the screen with a small
@@ -98,6 +100,12 @@ Rules that keep it rebuildable:
 - **New source files must be listed in `build.files` in `package.json`.**
   Otherwise the packaged app ships without them while `npm start` keeps
   working, which is a nasty one to find.
+- **`main.js` never trusts its window.** Every call goes through
+  `liveWindow()` (a destroyed window throws on every method), closing hides
+  (⌘W is in Electron's default menu), only a real quit lets it close, and a
+  dead renderer is reloaded (at most 3 a minute). Before this, one stray ⌘W
+  left Blob running with no window, and the hotkey, tray and Dock all threw
+  "Object has been destroyed".
 
 ## Tests
 ```
@@ -108,6 +116,17 @@ case waits out the 700 ms close animation). It drives the state machine
 against a fake in-memory persistence object and also guards the rules above
 (no DOM in the store, no global-name collisions with `renderer.js`). Change a
 transition, change its test.
+
+```
+npm run test:app
+```
+The Electron-level check for `main.js`. It boots the real main process, then
+does the things that can strand an overlay app (⌘W, a destroyed window, a
+killed renderer, a renderer that dies on every load) and checks that Blob
+recovers and still quits. It needs a GUI session and briefly shows a Blob
+window, a tray icon and a Dock icon (~20 s), so don't type while it runs. It
+uses fixture data and its own profile, never your `threads.json`, so it is
+safe to run while Blob is open.
 
 ## Debugging
 - `THREAD_AXIS_DEBUG=1 npm start` logs every window resize and forwards
