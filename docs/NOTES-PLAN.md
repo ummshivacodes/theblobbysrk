@@ -391,6 +391,7 @@ Each has a natural home; none blocks the notes work.
 | **Ids can collide** if two items are created in the same millisecond (`Date.now().toString(36)`). Unreachable by typing; matters if a paste ever creates several items at once. | Reading `itemStore.addTask` while porting | `core/itemStore.js`: add a counter or random suffix, with a test |
 | **`Esc` with the right-click menu open also collapses the panel** (both handlers fire). | Writing the UI test (deliberately not asserted) | `ui/app.js` |
 | **Links captured before this feature have no page title** (a row shows the tidied address). Titles are only fetched right after a capture, on purpose: fetching every old link at every launch would hit those sites again and again (Instagram never answers with a title). A retro-fetch needs a "tried" marker on the item so each link is attempted once. Also: the ⚙ history rows show the raw text (history entries carry no link title). | Phase 4e design | `ui/linkTitles.js` + one optional field (the plan's sync note applies) |
+| **The Phase-0 hide/show checks need an unlocked desktop.** `ui.electron.js` waits for macOS to report the window's show/hide, and it does not while the screen is locked, so its last two hide/show checks fail then (62 of 64 pass). Check with `ioreg -n Root -d1 -a \| grep -A1 IOConsoleLocked` (do NOT use `osascript`: it hangs on a locked session and can raise a permission prompt). To make that pair lock-proof the test would send `window-hidden`/`window-shown` itself after the OS action, as the notes test does; that is a deliberate change to a test that is meant to stay unchanged, so it needs the owner's say-so. | 2026-09-22 verify | `test/app/ui.electron.js` (the hide/show section) |
 | **⌘Q or a crash while typing can lose up to ~0.8 s of typing** (the autosave interval). Folding, hiding, blurring and quitting through the × button all save first; ⌘Q from the menu gives the page no chance to. | Phase 4a design | `main.js`: a `before-quit` handshake (ask the page to flush, wait briefly) |
 
 ## 11. Progress log and integration notes
@@ -484,6 +485,13 @@ Kept current so a new session (or a different model) can pick up exactly where t
   unchanged title (no edit-time bump), renaming into and out of a link, a double-click on a link (no rename), the panel
   not folding mid-rename, and the Notes screen. **Phase 4 is complete.** 1,082 unit tests; the notes test has about 170
   checks.
+
+- **Phase 4 merged into `main`** (`cb3b9b4`, `--no-ff`). Verified on the merged tree: 1,082 unit tests, the lifecycle test,
+  the notes test (170 checks) and 62 of the 64 Phase-0 UI checks. The 2 that failed (the hide/show pair at the end of
+  `ui.electron.js`) wait for macOS to report a window show/hide, which it does not while the screen is locked: the Mac was
+  locked (`ioreg`: `IOConsoleLocked = true`), the failure was identical on a rerun, and the app code was byte-identical to
+  the last full pass. **Still to do to close that gap: run `npm run test:ui` once on an unlocked screen.** Nothing is
+  installed; Phase 5 (the swap of `/Applications/Blob.app`) is next and waits for the owner.
 
 **Lessons for whoever writes the next Electron test** (learned the hard way: about 150 test launches, most of them
 chasing flakes that were the machine, not the code)

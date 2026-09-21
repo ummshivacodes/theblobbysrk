@@ -237,8 +237,11 @@ The Electron-level check for `main.js`. It boots the real main process, then
 does the things that can strand an overlay app (⌘W, a destroyed window, a
 killed renderer, a renderer that dies on every load) and checks that Blob
 recovers and still quits. It needs a GUI session and briefly shows a Blob
-window, a tray icon and a Dock icon (~20 s), so don't type while it runs. Both
-Electron tests use fixture data and their own profile (see
+window, a tray icon and a Dock icon (~20 s), so don't type while it runs. It also
+needs an **unlocked screen**: while the Mac is locked macOS does not report a
+window's show/hide, so the two hide/show checks at the end of `test:ui` fail
+(the notes test owns those events and is unaffected). All the Electron tests use
+fixture data and their own profile (see
 `scripts/lib/isolatedApp.js`), never your `threads.json`, so they are safe to
 run while Blob is open.
 
