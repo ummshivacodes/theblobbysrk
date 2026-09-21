@@ -6,6 +6,7 @@
   "scripts": {
     "start": "electron .",
     "test": "node test/taskStore.test.js",
+    "test:unit": "node --test \"test/unit/**/*.test.mjs\"",
     "test:app": "electron test/lifecycle.electron.js",
     "build": "electron-builder --mac --dir",
     "install-app": "npm run build && rm -rf /Applications/Blob.app && cp -R dist/mac-arm64/Blob.app /Applications/Blob.app && echo 'Installed /Applications/Blob.app'"
@@ -22,6 +23,8 @@
       "preload.js",
       "taskStore.js",
       "renderer.js",
+      "main/**",
+      "src/**",
       "index.html",
       "style.css",
       "assets/**",

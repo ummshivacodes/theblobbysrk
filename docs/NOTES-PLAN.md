@@ -67,6 +67,7 @@ src/
   package.json             {"type":"module"}
   core/                    PURE: no DOM, no Electron, no I/O. Runs in Node today, in a phone app later.
     itemStore.js           the state machine (today's taskStore.js + note transitions)
+    history.js             toHistory (shared by itemStore and migrate)
     selectors.js           activeThreads, inboxItems, notes, searchNotes (pure functions of state)
     capture.js             parseCapture(raw) → {text, body};  isBareUrl(text)
     linkify.js             linkify(text) → [{type:'text'|'link', value, href?}]
@@ -205,8 +206,9 @@ next save overwrites everything. `main/persistence.js` fixes that:
 ## 7. Phases: one at a time, each ends green and committed
 
 **Rules for the implementer**
-1. Phases in order. Don't start one until the previous gate is green. One phase = one commit
-   (split further if useful), message ending with the session's attribution line.
+1. A phase's **gate** must be green before anything that depends on it starts; independent work
+   runs in parallel lanes (section 7a). One phase = one commit (split further if useful), message
+   ending with the session's attribution line.
 2. **Phases 0–2 change no behaviour.** If a Phase-0 check has to change for a later phase to pass,
    stop and ask.
 3. **Never touch live data or the running Blob.** Every Electron run uses fixture data and its own
@@ -220,12 +222,47 @@ next save overwrites everything. `main/persistence.js` fixes that:
 
 | Phase | What | Gate |
 |---|---|---|
-| **0. Safety net** | `test/app/ui.electron.js`: a black-box test of **today's** UI on fixture data (one item of every status). It drives the real DOM only: `win.show()` opens the panel, typing + `Enter`, `.click()`, `contextmenu`. Checks: per-status controls; bars/cores/counts; capture; tag (stays in dump) → push → recall; ✓ → strike at once → done, bar gone, score +1; gear screen; ↺; focus; hover sync; right-click Delete; retag; `Esc` behaviour; `–` then show; file on disk matches and has no `retagging`. Move the lifecycle test to `test/app/`, make both Electron tests honour `BLOB_MAIN` (path to `main.js`, so the same tests run against a packed `.asar`), add `npm run test:ui`, `verify`, `verify:packaged`. | New test green against the current code, 3 runs in a row |
-| **1. Modularize the renderer** | `renderer.js` + `taskStore.js` → `src/` ES modules per section 3 (function → module map below). `retagging` becomes view-local; `COLORS` → `ui/theme.js`; frozen snapshots; readiness flag; store tests ported to `test/unit/*.test.mjs` on `node:test`; architecture test added; `build.files` → globs. Delete the SELFTEST hook from `main.js` (Phase 0 supersedes it) and move SHOT to `scripts/`. No test code left in production `main.js`. | `npm run verify` green; Phase-0 test **unchanged** and green; `verify:packaged` green |
+| **0. Safety net** | `test/app/ui.electron.js`: a black-box test of **today's** UI on fixture data (one item of every status). It drives the real DOM only: `win.show()` opens the panel, typing + `Enter`, `.click()`, `contextmenu`. Checks: per-status controls; bars/cores/counts; capture; tag (stays in dump) → push → recall; ✓ → strike at once → done, bar gone, score +1; gear screen; ↺; focus; hover sync; right-click Delete; retag; `Esc` behaviour; `–` then show; file on disk matches and has no `retagging`. Move the lifecycle test to `test/app/`, make both Electron tests honour `BLOB_MAIN` (path to `main.js`, so the same tests run against a packed `.asar`), add `npm run test:ui`, `verify`, `verify:packaged`. Add the readiness flag (`<html data-ready="1">` once the first render is done) so tests never poke renderer globals. Retire the SELFTEST hook from `main.js` (this test supersedes it) and move the SHOT hook to `scripts/shot.electron.js`, so `main.js` carries no test code before lane B restructures it. | New test green against the current code, 3 runs in a row |
+| **1. Modularize the renderer** | `renderer.js` + `taskStore.js` → `src/` ES modules per section 3 (function → module map below). `retagging` becomes view-local; `COLORS` → `ui/theme.js`; frozen snapshots; readiness flag; store tests ported to `test/unit/*.test.mjs` on `node:test`; architecture test added; `build.files` → globs (already done in the prep commit). | `npm run verify` green; Phase-0 test **unchanged** and green; `verify:packaged` green |
 | **2. Modularize main + data safety** | `main.js` → `main/window.js`, `tray.js`, `persistence.js`, `ipc.js`. Section 6. Navigation lockdown. | verify + verify:packaged green; persistence unit tests |
 | **3. Notes in the core** | Section 4: `migrate`, new transitions, `selectors`, `capture`, `linkify`, plus `main/lib/safeUrl` and `titleFromHtml`. No UI change yet. | Unit tests green; UI test still unchanged and green |
 | **4. Notes UI** | In this order, each its own commit with new UI-test checks: **4a** expander + body editor + the don't-close-while-typing rule · **4b** N dot, `⌘↵`, multi-line paste · **4c** Notes screen · **4d** clickable links + `openExternal` · **4e** link titles · **4f** rename a title (double-click; lowest priority) | verify green after each |
 | **5. Ship** | README: Architecture, "Use it", and a short **"How to add a feature"** (which layer, which files). `verify:packaged` → back up `threads.json` → quit Blob → install → relaunch → confirm the window is up and every existing task survived. Refresh `Blob Workbench`. | Owner sees it working |
+
+### 7a. Parallel lanes (added 2026-09-21)
+
+The critical path is **0 → 1 → 3(store) → 4 → 5** and it is strictly sequential, with one owner
+(lane A). Two pieces are independent of it and run beside it. Expect roughly 30% less wall-clock,
+not 3×, for about 1.5× the tokens. **Never parallelize inside the critical path:** the views share
+conventions (the `actions` objects, snapshots, `dom.js`), and drift between them *is* a cross wire.
+
+| Lane | Owner | Owns (edits nothing else) | Work | Starts | Gate |
+|---|---|---|---|---|---|
+| **A** renderer | main session | `src/ui/**`, `src/core/itemStore.js`, `index.html`, `style.css`, `styles/**`, `test/app/**`, `test/unit/architecture.test.mjs`, `scripts/**`, `package.json`, `README.md`, `docs/**` | Phase 0 → 1 → 3 (store transitions) → 4 → 5, and every merge | now | as in the table above |
+| **B** main process | agent | `main/**`, `preload.js`, `main.js` (from B2 on), `test/unit/{persistence,safeUrl,titleFromHtml,links}.test.mjs` | **B1**: additive modules `persistence.js`, `lib/safeUrl.js`, `lib/titleFromHtml.js`, `links.js` (+ tests). **B2** = Phase 2: split `main.js`, wire B1 in, navigation lockdown, additive preload API | B1 now; B2 once Phase 0 is committed | B1: its unit tests. B2: the Phase-0 UI test and the lifecycle test **unchanged** and green |
+| **C** pure core | agent | `src/core/{history,migrate,capture,linkify,selectors}.js` and one `test/unit/*.test.mjs` each | Phase 3's pure functions | now | its unit tests |
+
+**Contract between B and A (fixed now, so neither waits on the other):** the existing
+`window.threadAxis` API is unchanged. Lane B only **adds** `openExternal(url) → Promise<boolean>`,
+`fetchTitle(url) → Promise<string|null>` and `getLoadNotice() → Promise<null | {kind:'recovered-from-backup', at:number}>`.
+Lane A's `bridge.js` picks them up in Phase 4; nothing in Phase 1 depends on them. (Main re-validates
+every URL with its own `safeUrl` even though `core/linkify` already checks: the main process never
+trusts the renderer, so that duplication is deliberate.)
+
+**Mechanics.** Each side lane works in its own git worktree and branch (`.blob-lanes/lane-b`,
+`lane-c`, branched from the prep commit); lane A works in the main tree on `main`. Lanes commit only
+their own paths. Lane A merges a lane when that lane's gate is green (`git merge --no-ff`, after
+checking the branch touched only owned paths), then runs the full `npm run verify`. Shared files
+(`package.json`, `README.md`, `docs/`) belong to lane A alone: a lane that needs a change there
+reports it. The architecture test (Phase 1) is the integration gate for B and C's files; until it
+exists they follow the dependency rules by hand. Run Electron-based tests one at a time if you can:
+several at once slow each other down and make timing flaky.
+
+**Reviewer.** Before Phase 5, one fresh agent audits the merged tree against sections 3–5, read-only,
+and reports violations.
+
+**Checkpoints for the owner:** after the refactor is merged and green (Phases 0–2, no visible
+change), before the visible features start, and before the final swap (Phase 5 restarts the live app).
 
 ### Phase 1 map: where today's `renderer.js` goes
 
