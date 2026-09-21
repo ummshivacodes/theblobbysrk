@@ -462,6 +462,13 @@ Kept current so a new session (or a different model) can pick up exactly where t
   covers a title, no title, an error, a `www.` address, text that must not be fetched, ⌘↵, search by page title, and a
   title that arrives while the person is typing in that very row (the case the redraw gate exists for).
 
+- **Notice bar done** (see `git log`): `ui/notice.js` (4 unit tests) and a `#notice` bar in the panel. Two notices so far:
+  the recovery message (`bridge.persistence.getLoadNotice()`, asked after the load) and "couldn't save" (the store's
+  `onSaveError`). A cause that goes away takes its own notice with it: `app.js` gives the store a persistence port that
+  clears the save notice on the next successful save, so a failure heals visibly (the store already keeps the change in
+  memory and re-saves everything on the next change). An unknown notice kind from a newer main process is ignored.
+  The notes test boots from a garbage live file with a good backup and makes the data folder read-only to prove both.
+
 **Lessons for whoever writes the next Electron test** (learned the hard way: about 150 test launches, most of them
 chasing flakes that were the machine, not the code)
 1. **Seal the window at creation** (`app.on('browser-window-created')`: `setFocusable(false)`, `setIgnoreMouseEvents(true)`).

@@ -97,6 +97,12 @@ npm start
   never throws it away. The ▸ is violet when a row has notes. The panel won't
   fold away while you're in the middle of typing; it folds when you stop, if
   the mouse is still away.
+- **A yellow bar across the top of the panel** appears when something needs
+  your attention and you can't fix it from where you are: Blob restored its
+  last backup at startup because the saved file was damaged (the damaged file is
+  kept next to it), or a change couldn't be saved (disk full, folder locked; the
+  change stays on screen, and the bar goes away by itself when a save works
+  again). × dismisses it.
 - **Scoreboard** at the bottom: "Done 2/10" is tasks closed out of tasks
   ever listed, plus how many are active. Lifetime counters stored in
   `threads.json` under `stats`; deleting a task does not shrink them. The
@@ -117,7 +123,7 @@ step: `index.html` loads one entry point, `src/ui/app.js`.
 |---|---|---|
 | `src/core/` | Pure logic. `itemStore.js`: the item state machine — tasks (`addTask`, `tagTask`, `dispatchToAxis`, `recallToDump`, `resolveThread`, `reopenTask`) and notes (`addNote`, `fileAsNote`, `unfileNote`, `setBody`, `setText`, `setLinkTitle`), plus `deleteItem` and `toggleFocus` for either. `selectors.js` (including `displayTitle`: how an item's title reads, e.g. a link as its page title), `capture.js`, `linkify.js`, `migrate.js` (schema v2). No DOM, no Electron, no I/O: persistence and the change callback are injected. It runs in plain Node, which is where it is tested, and a phone app could reuse it unchanged. The UI calls `setBody` (the notes editor), `addNote` (⌘↵, the Notes screen's box), `fileAsNote` (the N dot) and `unfileNote` (↩); links (`setLinkTitle`, `setText`) arrive with the rest of Phase 4. | only other `src/core/` files |
 | `src/ui/views/` | One file per thing on screen: `orbView`, `axisView`, `inboxView`, `scoreView`, `doneView`, plus `itemRow` (one row), `bodyEditor` (an item's notes: read text ↔ textarea), `notesView` (the Notes screen) and `notesBadgeView` (the header's N and its count). A view is `createXView(elements, actions)` returning `{ render(snapshot, ui), applyHover?(id) }`. It draws from a **frozen snapshot** and reports what the user did through `actions`. It can't reach the store or the bridge. | `ui/dom`, `ui/theme`, `ui/format`, `views/itemRow`, `views/bodyEditor`, `core/selectors`, `core/linkify` |
-| `src/ui/` | The page's machinery, one job per file: `bridge` (the only file that reads `window.threadAxis`), `snapshot`, `hover`, `panel` (fold-out animation + window sizing), `renderGate` (holds a redraw while the user is mid-gesture), `pressGuard` (a press on a button doesn't pull focus out of an open editor), `captureBox` (what a key in the capture box means: Enter, ⌘↵, several lines, input methods; a pure function, unit-tested), `linkTitles` (asks for a captured link's page title, fire and forget, unit-tested with fakes), `screens` (main / Notes / ⚙), `tooltip`, `rowMenu`, `dom`, `format`, `theme`. | each other, sparingly |
+| `src/ui/` | The page's machinery, one job per file: `bridge` (the only file that reads `window.threadAxis`), `snapshot`, `hover`, `panel` (fold-out animation + window sizing), `renderGate` (holds a redraw while the user is mid-gesture), `pressGuard` (a press on a button doesn't pull focus out of an open editor), `captureBox` (what a key in the capture box means: Enter, ⌘↵, several lines, input methods; a pure function, unit-tested), `linkTitles` (asks for a captured link's page title, fire and forget, unit-tested with fakes), `screens` (main / Notes / ⚙), `notice` (the notice bar), `tooltip`, `rowMenu`, `dom`, `format`, `theme`. | each other, sparingly |
 | `src/ui/app.js` | The composition root. Looks up the page's elements (the only file that knows the ids in `index.html`), creates the store and the views, and hands each only the elements and actions it needs. | everything in `src/` |
 | `style.css`, `styles/` | Styling. `style.css` is the original; each new feature adds a file under `styles/` (loaded after it by `index.html`) instead of growing it. | – |
 | `preload.js` | The only bridge between the page and Electron (IPC): `window.threadAxis`. | Electron |
@@ -204,7 +210,9 @@ The same kind of test for the notes UI (the ▸ expander and body editor, the N
 dot, ⌘↵ and multi-line capture, the Notes screen: search, editing, back to
 the dump, delete, the new-note box, and links). It stubs `shell.openExternal` and
 `net.fetch`, so no test opens your real browser or reaches the network, and it
-proves both stubs work before it clicks a link. It is a separate file
+proves both stubs work before it clicks a link. It starts from a crashed-mid-save
+file (garbage live file, good backup) to check the recovery notice, and makes the
+data folder read-only to check the failed-save notice. It is a separate file
 on purpose: `test:ui` pins today's behaviour and stays unchanged, this one grows
 with the feature. It covers typing, autosave, ⌘↵ and Esc, the redraw being held
 while you type, the panel not folding mid-sentence, hiding the window while

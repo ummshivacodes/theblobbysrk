@@ -118,3 +118,17 @@
 
 /* A link that stands for a page: its title, and the site it is on beside it in a muted colour. */
 .link-domain { margin-left: 6px; font-size: 10px; color: rgba(255, 255, 255, 0.45); }
+
+/* ---------- The notice bar (a restored backup, a failed save) ---------- */
+.notice {
+  display: flex; align-items: flex-start; gap: 8px; margin: 0 0 8px; padding: 6px 8px;
+  border-radius: 7px; font-size: 11px; line-height: 1.4; color: #f3dfa2;
+  background: rgba(224, 178, 62, 0.14); border: 1px solid rgba(224, 178, 62, 0.4);
+}
+.notice[hidden] { display: none; }
+.notice-text { flex: 1; min-width: 0; }
+.notice-close {
+  flex: none; width: 16px; height: 16px; padding: 0; border: none; border-radius: 4px;
+  background: transparent; color: inherit; font-size: 14px; line-height: 16px; cursor: pointer; opacity: 0.7;
+}
+.notice-close:hover { opacity: 1; background: rgba(255, 255, 255, 0.1); }

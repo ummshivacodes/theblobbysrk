@@ -13,6 +13,8 @@
 // blur and focus events do not depend on which window is active. The pointer checks use real (trusted)
 // input events injected straight into the page, which bypass all of that: the bugs they guard against, a
 // click lost to the page shifting under it, cannot be reproduced with synthetic ones.
+const fs = require('fs');
+const path = require('path');
 const { app: electronApp, shell, net } = require('electron');
 const { bootIsolatedApp } = require('../../scripts/lib/isolatedApp.js');
 const { sleep, waitFor, createReporter } = require('./harness.js');
@@ -80,6 +82,12 @@ const ctx = bootIsolatedApp({
     history: [],
   },
 });
+// Start the way an app looks after a crash in the middle of a save: the live file is garbage and only the
+// backup is good. (Done here, synchronously, before Electron is ready to load anything.) The app must come up
+// on the backup's data and say so.
+fs.copyFileSync(ctx.dataFile, path.join(ctx.tmp, 'threads.backup.json'));
+fs.writeFileSync(ctx.dataFile, '{ "threads": [ this is not json');
+
 const { app, BrowserWindow } = ctx;
 const { check, expectEq, finish } = createReporter({ app, cleanup: ctx.cleanup });
 
@@ -142,6 +150,7 @@ function pageDriver() {
       capture: { value: $('#taskInput').value, placeholder: $('#taskInput').placeholder, tag: $('#taskInput').tagName },
       badge: { text: $('#notesBtn').textContent, count: $('#notesCount').textContent, pulsing: $('#notesBtn').classList.contains('pulse') },
       dump: $('#taskCount').textContent,
+      notice: { hidden: $('#notice').hidden, text: $('#noticeText').textContent },
       bars: $$('#axisSvg g.bar-g').map((g) => ({ id: g.dataset.id, label: $('.thread-label', g).textContent })),
       anchorsWithHref: document.querySelectorAll('a[href]').length,
       path: location.pathname,
@@ -283,6 +292,12 @@ app.whenReady().then(async () => {
 
   let s = await until((x) => x.ready && x.rows.length === 6, 12000);
   if (!check('boots and draws the saved state', !!s, why(s))) return finish();
+  s = await until((x) => !x.notice.hidden);
+  check('a damaged file is restored from the backup at startup, and the page says so', !!s && /restored its last backup/.test(s.notice.text), why(s));
+  check('…the damaged file was kept beside the data, not overwritten',
+    fs.readdirSync(ctx.tmp).some((f) => /^threads\.corrupt-\d+\.json$/.test(f)));
+  s = await act('click', '#noticeClose');
+  check('× dismisses the notice', s.notice.hidden);
   await act('hoverShell', true);
   s = await until((x) => x.panelOpen && x.panelDisplay === 'block');
   if (!check('the panel opens', !!s, why(s))) return finish();
@@ -741,6 +756,25 @@ app.whenReady().then(async () => {
   await act('pageKey', 'Escape');
   s = await until((x) => x.screen === 'main');
   check('(setup) back on the main screen', !!s, why(s));
+
+  // ---- a failed save is never silent ---------------------------------------------------------------------------------------------------
+  const onDiskByText = (text) => disk().threads.find((t) => t.text === text);
+  // (Electron prints the refused 'save-threads' handler, an EACCES, to stderr while this runs: expected.)
+  fs.chmodSync(ctx.tmp, 0o500); // the data folder stops accepting writes: what a full or locked disk looks like
+  try {
+    s = await act('capture', 'written while the disk refuses');
+    s = await until((x) => !x.notice.hidden);
+    check('when a save fails the notice bar says so', !!s && /Couldn.t save/.test(s.notice.text), why(s));
+    check('…the change is still on screen', !!rowOf(s, 'written while the disk refuses'));
+    check('…and it is not on disk', !onDiskByText('written while the disk refuses'));
+  } finally {
+    fs.chmodSync(ctx.tmp, 0o700); // whatever happened above, give the folder back (the test cleans it up afterwards)
+  }
+  await act('capture', 'written after the disk is back');
+  check('the next change saves everything, including the one that had failed',
+    await untilDisk((d) => !!d.threads.find((t) => t.text === 'written while the disk refuses') && !!d.threads.find((t) => t.text === 'written after the disk is back')));
+  s = await until((x) => x.notice.hidden);
+  check('…and the notice goes away by itself', !!s, why(s));
 
   // ---- a real press on a button while an editor has focus ---------------------------------------------------------------------
   // Typing a note, then clicking ✓ on the row below it, must work with ONE click. If the press pulled focus

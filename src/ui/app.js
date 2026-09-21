@@ -7,6 +7,7 @@ import { createBridge } from './bridge.js';
 import { createCaptureBox } from './captureBox.js';
 import { createHover } from './hover.js';
 import { createLinkTitles } from './linkTitles.js';
+import { createNotice, describeLoadNotice, SAVE_FAILED } from './notice.js';
 import { createPanel } from './panel.js';
 import { installPressGuard } from './pressGuard.js';
 import { createRenderGate } from './renderGate.js';
@@ -32,6 +33,7 @@ const input = $('taskInput');
 
 // ---- infrastructure ------------------------------------------------------------------------
 const tooltip = createTooltip({ el: $('tooltip'), shell });
+const notice = createNotice({ bar: $('notice'), text: $('noticeText'), close: $('noticeClose') });
 const rowMenu = createRowMenu({ el: $('rowMenu'), shell });
 
 const screens = createScreens(
@@ -162,10 +164,21 @@ document.addEventListener('pointerdown', () => { pointerDownAt = Date.now(); }, 
 // Pressing a button while a body is being edited must not pull focus out of it (see ui/pressGuard.js).
 installPressGuard({ root: shell, isEditing: editingBody });
 
-// A save that fails (disk full, permissions) must not be silent. For now it is logged; the Notes work
-// shows it to the user in a notice bar, which is where getLoadNotice's recovery message will go too.
-store = createItemStore(bridge.persistence, gate.request, {
-  onSaveError: (err) => console.error('[blob] could not save:', err),
+// A save that fails (disk full, permissions) is never silent: the notice bar says so, and it goes away by itself
+// the next time a save succeeds (the store keeps the change in memory and saves everything again on the next
+// change, so a failure heals itself). The port the store gets is the bridge's, watched for successes.
+const persistence = {
+  loadThreads: () => bridge.persistence.loadThreads(),
+  saveThreads: (data) => Promise.resolve(bridge.persistence.saveThreads(data)).then((saved) => {
+    notice.clear('save');
+    return saved;
+  }),
+};
+store = createItemStore(persistence, gate.request, {
+  onSaveError: (err) => {
+    console.error('[blob] could not save:', err);
+    notice.show('save', SAVE_FAILED);
+  },
 });
 
 // ---- wiring --------------------------------------------------------------------------------
@@ -218,4 +231,12 @@ document.addEventListener('keydown', (e) => {
 
 // Readiness flag for tests and tooling: set once the saved state is loaded and drawn, so nothing has
 // to poke this app's internals to know the page is up.
-store.loadState().then(() => { document.documentElement.dataset.ready = '1'; });
+store.loadState().then(() => {
+  document.documentElement.dataset.ready = '1';
+  // The main process may have had to restore the backup to load at all: say so (after the load, which is
+  // when it finds out).
+  return bridge.persistence.getLoadNotice();
+}).then((loadNotice) => {
+  const message = describeLoadNotice(loadNotice);
+  if (message) notice.show('load', message);
+}).catch((err) => console.error('[blob] could not read the load notice:', err));

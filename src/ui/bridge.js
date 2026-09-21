@@ -7,6 +7,8 @@ export function createBridge(api = window.threadAxis) {
     persistence: {
       loadThreads: () => api.loadThreads(),
       saveThreads: (data) => api.saveThreads(data),
+      // null, or { kind: 'recovered-from-backup', at } when the load had to fall back to the backup.
+      getLoadNotice: () => api.getLoadNotice(),
     },
     // Asking the window to change: the renderer measures itself and asks for that size.
     windowCtl: {
