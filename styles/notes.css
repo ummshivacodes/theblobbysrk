@@ -85,3 +85,26 @@
   0%   { box-shadow: 0 0 0 0 rgba(185, 168, 255, 0.75); }
   100% { box-shadow: 0 0 0 8px rgba(185, 168, 255, 0); }
 }
+
+/* ---------- The Notes screen ---------- */
+.notes-head { margin-bottom: 6px; }
+.notes-head input {
+  width: 100%; padding: 6px 9px; border-radius: 7px; outline: none;
+  border: 1px solid rgba(255, 255, 255, 0.15); background: rgba(255, 255, 255, 0.06);
+  color: #fff; font-size: 12px;
+}
+.notes-head input:focus { border-color: var(--note); }
+.notes-head input::placeholder { color: rgba(255, 255, 255, 0.4); }
+.notes-btn.on { background: rgba(255, 255, 255, 0.14); }
+
+/* A note's second line: a preview of its body, and when it was last edited. */
+.note-meta {
+  flex: 0 0 100%; display: flex; justify-content: space-between; gap: 8px;
+  padding: 0 0 1px 18px; font-size: 10px; color: rgba(255, 255, 255, 0.45);
+}
+.note-snippet { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.note-when { flex: none; }
+.note-when:only-child { margin-left: auto; }
+.task-row .task-act.unfile:hover { background: var(--note); color: #1a1530; }
+
+.notes-empty { padding: 14px 6px; font-size: 11px; line-height: 1.5; opacity: 0.55; }

@@ -18,6 +18,7 @@ import { createDoneView } from './views/doneView.js';
 import { EDIT_ENDED } from './views/bodyEditor.js';
 import { createInboxView } from './views/inboxView.js';
 import { createNotesBadgeView } from './views/notesBadgeView.js';
+import { createNotesView } from './views/notesView.js';
 import { createOrbView } from './views/orbView.js';
 import { createScoreView } from './views/scoreView.js';
 
@@ -33,11 +34,12 @@ const tooltip = createTooltip({ el: $('tooltip'), shell });
 const rowMenu = createRowMenu({ el: $('rowMenu'), shell });
 
 const screens = createScreens(
-  { main: $('mainScreen'), done: $('doneScreen'), gearBtn: $('gearBtn') },
+  { main: $('mainScreen'), notes: $('notesScreen'), done: $('doneScreen'), gearBtn: $('gearBtn'), notesBtn: $('notesBtn') },
   {
     onChange(name) {
       rowMenu.hide();
       if (name === 'main') setTimeout(() => input.focus(), 0);
+      if (name === 'notes') setTimeout(() => notes.open(), 0);
     },
   },
 );
@@ -46,9 +48,9 @@ const panel = createPanel({
   shell,
   panel: $('panel'),
   windowCtl: bridge.windowCtl,
-  // Mid-sentence: a body is being edited, or the capture box has something in it. (A box that merely has
+  // Mid-sentence: a body is being edited, or a box has something typed in it. (A box that merely has
   // focus, empty, has nothing to lose: it must not keep the panel from folding.)
-  isTyping: () => inbox.isEditing() || (document.activeElement === input && input.value.trim() !== ''),
+  isTyping: () => editingBody() || typedIn.some((box) => document.activeElement === box && box.value.trim() !== ''),
   onCollapse() {
     tooltip.hide();
     hover.set(null);
@@ -71,6 +73,7 @@ const actions = {
   focus: (id) => store.toggleFocus(id),
   setBody: (id, body) => store.setBody(id, body),
   fileNote: (id) => store.fileAsNote(id),
+  unfile: (id) => store.unfileNote(id),
   remove: (id) => {
     if (hover.get() === id) hover.set(null); // a deleted row can't stay hovered
     store.deleteItem(id);
@@ -92,7 +95,15 @@ const inbox = createInboxView(
   { list: $('taskList'), count: $('taskCount') },
   pick(actions, ['tag', 'push', 'recall', 'resolve', 'reopen', 'focus', 'remove', 'setBody', 'fileNote', 'hover', 'openMenu']),
 );
+const notes = createNotesView(
+  { search: $('notesSearch'), list: $('noteList'), count: $('noteCount') },
+  pick(actions, ['unfile', 'remove', 'setBody', 'openMenu']),
+);
 const notesBadge = createNotesBadgeView({ button: $('notesBtn'), count: $('notesCount') });
+
+// Is a notes editor being typed in, on either list? And which boxes count as "typed in" when they have text.
+const editingBody = () => inbox.isEditing() || notes.isEditing();
+const typedIn = [input, $('noteInput'), $('notesSearch')];
 const score = createScoreView({ done: $('doneCount'), listed: $('listedCount'), active: $('activeCount') });
 const done = createDoneView(
   {
@@ -113,6 +124,7 @@ function drawAll() {
   orb.render(snapshot, ui);
   axis.render(snapshot, ui);
   inbox.render(snapshot, ui);
+  notes.render(snapshot);
   score.render(snapshot);
   notesBadge.render(snapshot);
   done.render(snapshot);
@@ -126,7 +138,7 @@ function drawAll() {
 const POINTER_HOLD_MAX_MS = 5000; // a press that never reports its release must not freeze the page
 let pointerDownAt = 0;
 const pointerHeld = () => pointerDownAt > 0 && Date.now() - pointerDownAt < POINTER_HOLD_MAX_MS;
-const gate = createRenderGate({ draw: drawAll, isHeld: () => pointerHeld() || inbox.isEditing() });
+const gate = createRenderGate({ draw: drawAll, isHeld: () => pointerHeld() || editingBody() });
 
 // Any of these can be the end of a gesture: a held redraw may be due, and a postponed fold of the panel
 // (the mouse left while the user was typing). Both just ask again whether they are still held; the ones
@@ -139,7 +151,7 @@ document.addEventListener('pointerdown', () => { pointerDownAt = Date.now(); }, 
 ['keyup', 'focusout', EDIT_ENDED].forEach((type) => document.addEventListener(type, settleSoon, true));
 
 // Pressing a button while a body is being edited must not pull focus out of it (see ui/pressGuard.js).
-installPressGuard({ root: shell, isEditing: () => inbox.isEditing() });
+installPressGuard({ root: shell, isEditing: editingBody });
 
 // A save that fails (disk full, permissions) must not be silent. For now it is logged; the Notes work
 // shows it to the user in a notice bar, which is where getLoadNotice's recovery message will go too.
@@ -148,6 +160,16 @@ store = createItemStore(bridge.persistence, gate.request, {
 });
 
 // ---- wiring --------------------------------------------------------------------------------
+// The Notes screen's own box: everything typed there is a note (a note added while a search is showing would
+// be hidden by it, so the search is cleared first).
+createCaptureBox($('noteInput'), {
+  enterMeansNote: true,
+  onCapture({ text, body }) {
+    notes.clearSearch();
+    store.addNote(text, body);
+  },
+});
+
 // Enter dumps a task, ⌘↵ saves a note; several lines become a title and its notes (see ui/captureBox.js).
 createCaptureBox(input, {
   onCapture({ text, body, asNote }) {
@@ -164,7 +186,8 @@ createCaptureBox(input, {
 
 $('hideBtn').addEventListener('click', () => bridge.windowCtl.hide());
 $('quitBtn').addEventListener('click', () => bridge.windowCtl.quit());
-$('gearBtn').addEventListener('click', () => screens.show(screens.current() === 'main' ? 'done' : 'main'));
+$('gearBtn').addEventListener('click', () => screens.show(screens.current() === 'done' ? 'main' : 'done'));
+$('notesBtn').addEventListener('click', () => screens.show(screens.current() === 'notes' ? 'main' : 'notes'));
 $('backBtn').addEventListener('click', () => screens.show('main'));
 
 // Hotkey reveal: open with the input ready. Hidden: drop to ambient, so the next reveal starts from

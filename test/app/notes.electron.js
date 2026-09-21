@@ -75,9 +75,32 @@ function pageDriver() {
   const fire = (el, type, init = {}) => el.dispatchEvent(new MouseEvent(type, {
     bubbles: type !== 'mouseenter' && type !== 'mouseleave', cancelable: true, ...init,
   }));
-  const rowEl = (text) => $$('#taskList .task-row').find((r) => $('.task-text', r).textContent === text) || null;
-  const row = (text) => need(rowEl(text), `row "${text}"`);
-  const inRow = (text, sel) => need($(sel, row(text)), `${sel} in row "${text}"`);
+  // Every row helper works on the task list by default, or on another list ('#noteList') when told to.
+  const rowEl = (text, list = '#taskList') => $$(`${list} .task-row`).find((r) => $('.task-text', r).textContent === text) || null;
+  const row = (text, list) => need(rowEl(text, list), `row "${text}" in ${list || '#taskList'}`);
+  const inRow = (text, sel, list) => need($(sel, row(text, list)), `${sel} in row "${text}"`);
+
+  // What one row looks like, for either list.
+  function describe(r) {
+    const exp = $('.row-expander', r);
+    const edit = $('.body-edit', r);
+    const read = $('.body-read', r);
+    return {
+      id: r.dataset.id,
+      text: $('.task-text', r).textContent,
+      cls: [...r.classList].filter((c) => !['task-row', 'fresh'].includes(c)).sort(),
+      expander: exp && { open: exp.classList.contains('open'), hasBody: exp.classList.contains('has-body'), aria: exp.getAttribute('aria-expanded') },
+      body: edit ? { mode: 'edit', value: edit.value, focused: document.activeElement === edit }
+        : read ? { mode: 'read', value: read.textContent, empty: read.classList.contains('empty') }
+          : null,
+      acts: $$('.task-act', r).map((b) => b.textContent),
+      dots: $$('.tag-dot', r).map((d) => d.textContent),
+      noteDot: !!$('.note-dot', r),
+      chip: $('.tag-chip', r) ? $('.tag-chip', r).textContent : null,
+      snippet: $('.note-snippet', r) ? $('.note-snippet', r).textContent : null,
+      when: $('.note-when', r) ? $('.note-when', r).textContent : null,
+    };
+  }
 
   function snapshot() {
     const active = document.activeElement;
@@ -92,24 +115,17 @@ function pageDriver() {
       badge: { text: $('#notesBtn').textContent, count: $('#notesCount').textContent, pulsing: $('#notesBtn').classList.contains('pulse') },
       dump: $('#taskCount').textContent,
       active: active && active !== document.body ? `${active.tagName.toLowerCase()}${active.className ? `.${String(active.className).split(' ')[0]}` : ''}` : null,
-      rows: $$('#taskList .task-row').map((r) => {
-        const exp = $('.row-expander', r);
-        const edit = $('.body-edit', r);
-        const read = $('.body-read', r);
-        return {
-          id: r.dataset.id,
-          text: $('.task-text', r).textContent,
-          cls: [...r.classList].filter((c) => !['task-row', 'fresh'].includes(c)).sort(),
-          expander: exp && { open: exp.classList.contains('open'), hasBody: exp.classList.contains('has-body'), aria: exp.getAttribute('aria-expanded') },
-          body: edit ? { mode: 'edit', value: edit.value, focused: document.activeElement === edit }
-            : read ? { mode: 'read', value: read.textContent, empty: read.classList.contains('empty') }
-              : null,
-          acts: $$('.task-act', r).map((b) => b.textContent),
-          dots: $$('.tag-dot', r).map((d) => d.textContent),
-          noteDot: !!$('.note-dot', r),
-          chip: $('.tag-chip', r) ? $('.tag-chip', r).textContent : null,
-        };
-      }),
+      rows: $$('#taskList .task-row').map(describe),
+      screen: $('#mainScreen').classList.contains('active') ? 'main'
+        : $('#notesScreen').classList.contains('active') ? 'notes'
+          : $('#doneScreen').classList.contains('active') ? 'done' : '?',
+      notesBtnOn: $('#notesBtn').classList.contains('on'),
+      search: { value: $('#notesSearch').value, focused: document.activeElement === $('#notesSearch') },
+      noteCount: $('#noteCount').textContent,
+      noteInput: { value: $('#noteInput').value, placeholder: $('#noteInput').placeholder },
+      notes: $$('#noteList .task-row').map(describe),
+      notesEmpty: $('#noteList .notes-empty') ? $('#noteList .notes-empty').textContent : null,
+      menu: { open: $('#rowMenu').style.display === 'block', items: $$('#rowMenu button').map((b) => b.textContent) },
     };
   }
 
@@ -117,18 +133,39 @@ function pageDriver() {
   window.__notes = {
     snapshot,
     hoverShell: (on) => { fire($('#shell'), on ? 'mouseenter' : 'mouseleave'); return snapshot(); },
-    rowClick: (text, sel) => { inRow(text, sel).click(); return snapshot(); },
-    expander: (text) => { inRow(text, '.row-expander').click(); return snapshot(); },
+    rowClick: (text, sel, list) => { inRow(text, sel, list).click(); return snapshot(); },
+    expander: (text, list) => { inRow(text, '.row-expander', list).click(); return snapshot(); },
+    rowFire: (text, type, init, list) => { fire(row(text, list), type, init); return snapshot(); },
+    menuClick: (startsWith) => {
+      need($$('#rowMenu button').find((b) => b.textContent.startsWith(startsWith)), `menu item "${startsWith}"`).click();
+      return snapshot();
+    },
+    // A key pressed anywhere on the page (Esc, say).
+    pageKey: (key) => { document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })); return snapshot(); },
+    // The Notes screen's search box: set the text and tell the page.
+    search: (value) => {
+      const box = $('#notesSearch');
+      box.value = value;
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+      return snapshot();
+    },
+    // The Notes screen's "new note…" box: type and press Enter.
+    noteCapture: (value, init = {}) => {
+      const box = $('#noteInput');
+      box.value = value;
+      box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...init }));
+      return snapshot();
+    },
     // Typing: set the value and tell the page, as a keystroke would.
-    type: (text, value) => {
-      const area = inRow(text, '.body-edit');
+    type: (text, value, list) => {
+      const area = inRow(text, '.body-edit', list);
       area.value = value;
       area.dispatchEvent(new Event('input', { bubbles: true }));
       return snapshot();
     },
     // A key pressed while the row's editor has focus.
-    key: (text, key, init = {}) => {
-      inRow(text, '.body-edit').dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init }));
+    key: (text, key, init = {}, list) => {
+      inRow(text, '.body-edit', list).dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init }));
       return snapshot();
     },
     // Type into the capture box and press a key in it (Enter by default), as a person would.
@@ -139,8 +176,8 @@ function pageDriver() {
       return snapshot();
     },
     dotClick: (text, n) => { $$('.tag-dot', row(text))[n - 1].click(); return snapshot(); },
-    mark: (text) => { marked = inRow(text, '.body-edit'); return true; },
-    isMarked: (text) => { const area = $('.body-edit', row(text)); return !!area && area === marked; },
+    mark: (text, list) => { marked = inRow(text, '.body-edit', list); return true; },
+    isMarked: (text, list) => { const area = $('.body-edit', row(text, list)); return !!area && area === marked; },
     blurActive: () => { if (document.activeElement) document.activeElement.blur(); return snapshot(); },
     // Where to aim a real pointer at: the middle of an element in a row.
     center: (text, sel) => {
@@ -399,6 +436,117 @@ app.whenReady().then(async () => {
   s = await act('capture', '   ', { metaKey: true });
   check('…and neither does ⌘↵', s.rows.length === 6 && s.badge.count === '3');
   s = await act('capture', '', {}); // leave the box empty
+
+  // ---- 4c: the Notes screen ---------------------------------------------------------------------------------------------------------------
+  const noteOf = (snap, text) => snap.notes.find((r) => r.text === text);
+  const titles = (snap) => snap.notes.map((r) => r.text);
+  const noteOnDisk = (d, text) => d.threads.find((t) => t.text === text);
+
+  await act('click', '#notesBtn');
+  s = await until((x) => x.screen === 'notes' && x.search.focused);
+  check('the header N opens the Notes screen, with the caret in the search box', !!s && s.notesBtnOn, why(s));
+  expectEq('it lists the notes, the most recently edited first', titles(s), ['a passing thought', 'call the vet about Bruno', 'later task A']);
+  check('…with how many there are', s.noteCount === '(3)');
+  check('…a note has no tag, only ↩ to send it back', s.notes.every((r) => !r.chip && r.dots.length === 0 && !r.noteDot && r.acts.join('') === '↩'));
+  check('…a preview of its notes if it has some, and when it was last edited',
+    noteOf(s, 'a passing thought').snippet === 'with some detail' && noteOf(s, 'call the vet about Bruno').snippet === null
+      && s.notes.every((r) => /^edited /.test(r.when || '')), JSON.stringify(s.notes.map((r) => [r.snippet, r.when])));
+  check('…and the "new note…" box says what Enter does', s.noteInput.placeholder === 'new note…   ↵ saves');
+
+  s = await act('search', 'vet');
+  expectEq('searching narrows the list by title', titles(s), ['call the vet about Bruno']);
+  check('…and says how many of how many', s.noteCount === '(1 of 3)');
+  s = await act('search', 'detail');
+  expectEq('…it looks in the notes as well as the titles', titles(s), ['a passing thought']);
+  s = await act('search', 'DETAIL passing');
+  expectEq('…every word has to match, in any order and any case', titles(s), ['a passing thought']);
+  s = await act('search', 'zzz nothing');
+  check('a search with no match says so', s.notes.length === 0 && /No notes match/.test(s.notesEmpty) && /zzz nothing/.test(s.notesEmpty), String(s.notesEmpty));
+  s = await act('search', '');
+  check('clearing the search brings everything back', s.notes.length === 3 && s.noteCount === '(3)');
+
+  // Open a note by its title, write in it, and watch the list wait for you.
+  await act('rowClick', 'call the vet about Bruno', '.task-text', '#noteList');
+  s = await until((x) => noteOf(x, 'call the vet about Bruno').body && noteOf(x, 'call the vet about Bruno').body.focused);
+  check('clicking a note\'s title opens it, with the caret in an empty body', !!s && noteOf(s, 'call the vet about Bruno').body.mode === 'edit'
+    && noteOf(s, 'call the vet about Bruno').expander.open, why(s));
+  await act('mark', 'call the vet about Bruno', '#noteList');
+  await act('type', 'call the vet about Bruno', 'ask about the booster shot', '#noteList');
+  check('what is typed in a note saves as you go',
+    await untilDisk((d) => noteOnDisk(d, 'call the vet about Bruno').body === 'ask about the booster shot'));
+  s = await act('snapshot');
+  check('…and the list does not reorder under your hands while you type (the edit made it the newest)',
+    titles(s)[0] === 'a passing thought' && await act('isMarked', 'call the vet about Bruno', '#noteList')
+      && noteOf(s, 'call the vet about Bruno').body.focused);
+  await act('blurActive');
+  s = await until((x) => x.notes.length > 0 && x.notes[0].text === 'call the vet about Bruno');
+  check('…when you finish, the note you edited is at the top, its notes shown as text', !!s
+    && noteOf(s, 'call the vet about Bruno').body.mode === 'read' && noteOf(s, 'call the vet about Bruno').body.value === 'ask about the booster shot', why(s));
+  check('…and it says it was edited just now', !!s && noteOf(s, 'call the vet about Bruno').when === 'edited just now');
+
+  // ↩ puts a note back in the task dump.
+  s = await act('rowClick', 'later task A', '.task-act.unfile', '#noteList');
+  check('↩ sends a note back to the dump: it leaves the Notes list', !noteOf(s, 'later task A') && s.noteCount === '(2)');
+  check('…and the header count follows', s.badge.count === '2');
+  check('…on disk it is an untagged task again, and counts as one', await untilDisk((d) => {
+    const t = d.threads.find((x) => x.id === 'later1');
+    return t && t.status === 'dump' && t.quad === null && d.stats.listed === 7;
+  }));
+  await act('click', '#notesBtn');
+  s = await until((x) => x.screen === 'main');
+  check('the header N again takes you back to the main screen', !!s && !s.notesBtnOn, why(s));
+  check('…where it is a task in the dump again: untagged, with Q1–Q4 and the N dot',
+    !!s && !!rowOf(s, 'later task A') && rowOf(s, 'later task A').dots.length === 4 && rowOf(s, 'later task A').noteDot, why(s));
+  await act('click', '#notesBtn');
+  await until((x) => x.screen === 'notes');
+
+  // Delete, from the right-click menu.
+  s = await act('rowFire', 'a passing thought', 'contextmenu', { clientX: 60, clientY: 60 }, '#noteList');
+  check('right-click on a note offers Delete', s.menu.open && JSON.stringify(s.menu.items) === JSON.stringify(['Delete "a passing thought"']));
+  s = await act('menuClick', 'Delete');
+  check('Delete removes the note', !noteOf(s, 'a passing thought') && s.noteCount === '(1)');
+  check('…from the file too, without touching the task counter', await untilDisk((d) => !noteOnDisk(d, 'a passing thought') && d.stats.listed === 7));
+
+  // The "new note…" box.
+  await act('search', 'vet');
+  s = await act('noteCapture', 'quick capture on the notes screen');
+  check('Enter in the "new note…" box adds a note at the top and clears the box',
+    titles(s)[0] === 'quick capture on the notes screen' && s.noteInput.value === '');
+  check('…even with a search showing: the search is cleared so the new note is not hidden by it', s.search.value === '' && s.notes.length === 2);
+  check('…and the header counts it and pulses', s.badge.count === '2' && s.badge.pulsing);
+  check('…saved as a note', await untilDisk((d) => { const t = noteOnDisk(d, 'quick capture on the notes screen'); return t && t.status === 'note'; }));
+  s = await act('noteCapture', 'title in the notes box\nand the rest is its body');
+  check('several lines: the first is the title, the rest the body, as everywhere else',
+    !!noteOf(s, 'title in the notes box') && await untilDisk((d) => noteOnDisk(d, 'title in the notes box').body === 'and the rest is its body'));
+  s = await act('noteCapture', '   ');
+  check('a blank note is not added', s.notes.length === 3 && s.badge.count === '3');
+  s = await act('noteCapture', 'a line\nbreak', { shiftKey: true });
+  check('Shift+Enter is a new line here too', s.noteInput.value === 'a line\nbreak' && s.notes.length === 3);
+  await act('noteCapture', '');
+
+  // Leaving the screen.
+  s = await act('pageKey', 'Escape');
+  check('Esc returns to the main screen without closing the panel', s.screen === 'main' && s.panelOpen && !s.notesBtnOn);
+  await act('click', '#notesBtn');
+  await until((x) => x.screen === 'notes');
+  s = await act('click', '#gearBtn');
+  check('⚙ from the Notes screen goes to the ⚙ screen (not back to main)', s.screen === 'done' && !s.notesBtnOn);
+  s = await act('pageKey', 'Escape');
+  check('…and Esc from there returns to the main screen', s.screen === 'main');
+
+  // No notes at all.
+  await act('click', '#notesBtn');
+  await until((x) => x.screen === 'notes');
+  for (const title of ['title in the notes box', 'quick capture on the notes screen', 'call the vet about Bruno']) {
+    await act('rowFire', title, 'contextmenu', { clientX: 60, clientY: 60 }, '#noteList');
+    await act('menuClick', 'Delete');
+  }
+  s = await act('snapshot');
+  check('with no notes left the screen says so', s.notes.length === 0 && /No notes yet/.test(s.notesEmpty) && s.noteCount === '(0)', String(s.notesEmpty));
+  check('…and the header N shows no count', s.badge.count === '' && s.badge.text === 'N');
+  await act('pageKey', 'Escape');
+  s = await until((x) => x.screen === 'main');
+  check('(setup) back on the main screen for what follows', !!s, why(s));
 
   // ---- a real press on a button while an editor has focus ---------------------------------------------------------------------
   // Typing a note, then clicking ✓ on the row below it, must work with ONE click. If the press pulled focus

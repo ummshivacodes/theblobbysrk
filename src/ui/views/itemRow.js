@@ -1,4 +1,5 @@
 import { el } from '../dom.js';
+import { firstLine, fmtAgo } from '../format.js';
 import { COLORS } from '../theme.js';
 import { createBodyEditor } from './bodyEditor.js';
 
@@ -6,7 +7,7 @@ import { createBodyEditor } from './bodyEditor.js';
 // status; expanded, the item's body sits under it. Pure construction: it never touches the store, and
 // every interaction goes out through `handlers`:
 //   { tag(id, q), startRetag(id), push(id), recall(id), resolve(id), reopen(id), focus(id),
-//     hover(id | null), menu(x, y, item), toggleExpand(id), saveBody(id, body), fileNote(id) }
+//     hover(id | null), menu(x, y, item), toggleExpand(id), saveBody(id, body), fileNote(id), unfile(id) }
 
 // A round action button; clicking it must not also count as a click on the row.
 function actionButton(className, text, title, run) {
@@ -62,6 +63,10 @@ function tagControl(item, retagging, handlers) {
 // Dump + tagged → → pushes it onto the axis; on the axis → ← recalls it to the dump and ✓ closes the
 // loop; crossed off → ↺ reopens it.
 function actionButtons(item, handlers) {
+  // A note has no tag and never goes on the axis. ↩ sends it back to the dump, where it is a task again.
+  if (item.status === 'note') {
+    return [actionButton('unfile', '↩', 'Back to the task dump', () => handlers.unfile(item.id))];
+  }
   if (item.status === 'done') {
     return [actionButton('undo', '↺', 'Reopen (undo cross-off)', () => handlers.reopen(item.id))];
   }
@@ -89,6 +94,17 @@ function expander(item, expanded, handlers) {
   });
 }
 
+// A note's second line: the first line of its body (only while it is closed: open, the body is right
+// there) and when it was last edited.
+function noteMeta(item, expanded) {
+  const meta = el('div', { className: 'note-meta' });
+  const snippet = expanded ? '' : firstLine(item.body);
+  if (snippet) meta.appendChild(el('span', { className: 'note-snippet', text: snippet }));
+  const when = fmtAgo(item.updatedAt ?? item.createdAt);
+  if (when) meta.appendChild(el('span', { className: 'note-when', text: `edited ${when}` }));
+  return meta;
+}
+
 // opts = { retagging: boolean, fresh: boolean, expanded: boolean, autofocusBody: boolean, handlers }
 export function buildRow(item, { retagging, fresh, expanded = false, autofocusBody = false, handlers }) {
   const row = el('div', { className: 'task-row', dataset: { id: item.id } });
@@ -109,16 +125,20 @@ export function buildRow(item, { retagging, fresh, expanded = false, autofocusBo
     text: item.text,
     title: item.status === 'axis' ? 'Click to focus this thread' : item.text,
   });
-  text.onclick = () => { if (item.status === 'axis') handlers.focus(item.id); };
+  text.onclick = () => {
+    if (item.status === 'axis') handlers.focus(item.id);
+    else if (item.status === 'note') handlers.toggleExpand(item.id); // a note's title opens it
+  };
   row.appendChild(text);
-  // Rows still in the dump have no bar or core to light up.
-  if (item.status !== 'dump') {
+  // Rows still in the dump have no bar or core to light up, and neither has a note.
+  if (item.status !== 'dump' && item.status !== 'note') {
     row.addEventListener('mouseenter', () => handlers.hover(item.id));
     row.addEventListener('mouseleave', () => handlers.hover(null));
   }
 
-  row.appendChild(tagControl(item, retagging, handlers));
+  if (item.status !== 'note') row.appendChild(tagControl(item, retagging, handlers));
   actionButtons(item, handlers).forEach((button) => row.appendChild(button));
+  if (item.status === 'note') row.appendChild(noteMeta(item, expanded));
 
   if (expanded) {
     const editor = createBodyEditor(

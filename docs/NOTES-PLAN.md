@@ -221,7 +221,10 @@ the plan never stated them, so the code was the only spec):
 - **Header:** `Blob  ⌘⇧Y   [✎ n] [⚙] [–] [×]`. `✎` toggles the Notes screen.
 - **Notes screen:** search box (focused on open; every word must match title, body or link title) →
   list, newest edit first (title, first body line, "edited 2h ago") → expand to read/edit →
-  `↩` back to the dump, right-click → Delete. `Esc` returns to main. Friendly empty state.
+  `↩` back to the dump, right-click → Delete. `Esc` returns to main. Friendly empty state. As built: the header N
+  toggles it; opening it clears the search and focuses it; a note's title opens it (like ▸); a "new note…" box at
+  the bottom (Enter saves it, and clears the search so the new note isn't hidden by it); ⚙ from here goes to the ⚙
+  screen; collapsing the panel always lands on the main screen.
 - **Body editor:** empty → a textarea at once. Otherwise the text as written (`white-space: pre-wrap`; links
   clickable from 4d); click it to edit. It **saves as you type** (800 ms after the last keystroke), when focus
   leaves, and on `⌘↵` or `Esc`. **`Esc` keeps what was typed.** The mockup said "Esc cancel", but in a note taker
@@ -437,6 +440,12 @@ Kept current so a new session (or a different model) can pick up exactly where t
   (`notesBadgeView`, deciding from the count so every way of adding a note pulses alike and loading does not),
   `ui/captureBox.js` (12 unit tests for the key rules). The capture box became a textarea. The Phase-0 test still
   passes unchanged (64/64); the notes test gained the 4b checks.
+
+- **Phase 4c done** (see `git log`): the Notes screen (`views/notesView.js`; `screens.js` now has main / notes / done):
+  search over title, body and link title, newest edit first, a preview line and "edited 2h ago" (`fmtAgo`, `firstLine`
+  in `ui/format.js`), open a note by its title or ▸, ↩ back to the dump, right-click → Delete, a "new note…" box, the
+  empty states. `createOpenBodies()` (in `bodyEditor.js`) is the one place that knows which bodies are open and who gets
+  the caret; the inbox and the Notes list both use it instead of each keeping a copy. 1,042 unit tests.
 
 **Lessons for whoever writes the next Electron test** (learned the hard way: about 150 test launches, most of them
 chasing flakes that were the machine, not the code)

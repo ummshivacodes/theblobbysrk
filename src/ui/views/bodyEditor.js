@@ -31,6 +31,28 @@ export function isEditingIn(container) {
   return !!active && active.tagName === 'TEXTAREA' && container.contains(active);
 }
 
+// Which items have their body open, for one list. Opening the body of an item that has none takes the
+// caret, once (on the next draw), so you can start typing at once.
+export function createOpenBodies() {
+  const open = new Set();
+  let autofocus = null;
+  return {
+    isOpen: (id) => open.has(id),
+    toggle(id) {
+      if (open.delete(id)) autofocus = null;
+      else { open.add(id); autofocus = id; }
+    },
+    // Forget items that are no longer in the list (`present` is a Set of ids).
+    prune(present) { open.forEach((id) => { if (!present.has(id)) open.delete(id); }); },
+    // The id whose editor should take the caret on the coming draw; asking clears it.
+    takeAutofocus() {
+      const id = autofocus;
+      autofocus = null;
+      return id;
+    },
+  };
+}
+
 const trimEnd = (text) => text.replace(/\s+$/, '');
 const hasSelection = () => !!window.getSelection && window.getSelection().toString() !== '';
 

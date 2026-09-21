@@ -1,5 +1,5 @@
 import { inboxItems } from '../../core/selectors.js';
-import { isEditingIn } from './bodyEditor.js';
+import { createOpenBodies, isEditingIn } from './bodyEditor.js';
 import { buildRow } from './itemRow.js';
 
 // The main list ("Task dump"): every item that isn't a note, oldest first, each with the controls
@@ -11,8 +11,7 @@ const clip = (text) => (text.length > 24 ? `${text.slice(0, 23)}…` : text);
 
 export function createInboxView({ list, count }, actions) {
   const retagging = new Set(); // ids whose chip was clicked and now show the four dots again
-  const expanded = new Set();  // ids whose ▸ is open, so their body shows under the row
-  let focusBodyOf = null;      // one draw only: the row whose (empty) body editor should take focus
+  const openBodies = createOpenBodies(); // which rows have their ▸ open, so their body shows under the row
   let last = null;             // the latest render, so a click here can redraw just this list
 
   // Right-click entries for one item: Reopen (crossed off only) and Delete.
@@ -28,11 +27,7 @@ export function createInboxView({ list, count }, actions) {
   const handlers = {
     tag: (id, q) => { retagging.delete(id); actions.tag(id, q); },
     startRetag: (id) => { retagging.add(id); redraw(); },
-    toggleExpand: (id) => {
-      if (expanded.delete(id)) focusBodyOf = null;
-      else { expanded.add(id); focusBodyOf = id; }
-      redraw();
-    },
+    toggleExpand: (id) => { openBodies.toggle(id); redraw(); },
     saveBody: actions.setBody,
     fileNote: actions.fileNote,
     push: actions.push,
@@ -50,7 +45,8 @@ export function createInboxView({ list, count }, actions) {
     const items = inboxItems(snapshot);
     const present = new Set(items.map((item) => item.id));
     retagging.forEach((id) => { if (!present.has(id)) retagging.delete(id); });
-    expanded.forEach((id) => { if (!present.has(id)) expanded.delete(id); });
+    openBodies.prune(present);
+    const autofocus = openBodies.takeAutofocus();
 
     // Clearing the list collapses it, which throws the scroll position away: keep it.
     const scrolled = list.scrollTop;
@@ -60,12 +56,11 @@ export function createInboxView({ list, count }, actions) {
       list.appendChild(buildRow(item, {
         retagging: retagging.has(item.id),
         fresh: item.id === ui.freshId,
-        expanded: expanded.has(item.id),
-        autofocusBody: item.id === focusBodyOf,
+        expanded: openBodies.isOpen(item.id),
+        autofocusBody: item.id === autofocus,
         handlers,
       }));
     });
-    focusBodyOf = null;
     list.scrollTop = ui.freshId ? list.scrollHeight : scrolled;
   }
 
