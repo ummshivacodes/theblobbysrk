@@ -1,0 +1,59 @@
+/* Notes: the expander, the body editor, and (later in this file) the Notes screen.
+   Loaded after style.css, which stays as it was. */
+
+:root {
+  --note: #b9a8ff;            /* the note colour: the N dot, a row that has a body, the Notes button */
+  --note-soft: rgba(185, 168, 255, 0.45);
+  --body-max: 140px;          /* a body grows to this height, then scrolls */
+}
+
+/* A row can now carry a body under it, so its contents wrap onto a second line. The title still takes
+   whatever room is left on the first line (its flex-basis is 0, so it never causes a wrap itself). */
+.task-row { flex-wrap: wrap; }
+
+/* ▸ opens the body. Dim when there is nothing to read, violet when there is. */
+.row-expander {
+  flex: none; width: 16px; height: 18px; padding: 0; margin-left: -2px;
+  border: none; border-radius: 4px; background: transparent;
+  color: rgba(255, 255, 255, 0.28); font-size: 10px; line-height: 18px; cursor: pointer;
+  transition: transform 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+.row-expander:hover { color: rgba(255, 255, 255, 0.75); background: rgba(255, 255, 255, 0.08); }
+.row-expander.has-body { color: var(--note); }
+.row-expander.open { transform: rotate(90deg); }
+
+/* The body area takes a whole line under the row, indented past the expander. */
+.body-area { flex: 0 0 100%; padding: 3px 0 4px 18px; }
+
+.body-read {
+  font-size: 11px; line-height: 1.45; color: rgba(255, 255, 255, 0.8);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  max-height: var(--body-max); overflow-y: auto;
+  padding: 4px 6px; border-radius: 5px; cursor: text;
+}
+.body-read:hover { background: rgba(255, 255, 255, 0.05); }
+.body-read.empty { color: rgba(255, 255, 255, 0.35); font-style: italic; cursor: default; }
+
+.body-edit {
+  display: block; width: 100%; resize: none;
+  field-sizing: content;                   /* grows with what is typed... */
+  min-height: 52px; max-height: var(--body-max); overflow-y: auto; /* ...up to a limit, then scrolls */
+  padding: 6px 8px; border-radius: 6px;
+  font-size: 11px; line-height: 1.45; color: #fff;
+  background: rgba(255, 255, 255, 0.06); border: 1px solid var(--note-soft); outline: none;
+}
+.body-edit:focus { border-color: var(--note); }
+.body-edit::placeholder { color: rgba(255, 255, 255, 0.35); }
+.body-hint { margin-top: 3px; font-size: 9px; text-align: right; opacity: 0.4; }
+
+/* Scrollbars that take their own room. The default overlay scrollbar floats over the right-hand edge
+   of a scrolling area, which is exactly where each row's → and ✓ buttons are: with an editor open the
+   list scrolls, and the scrollbar would sit on top of them. A slim one beside the rows cannot. */
+.task-list::-webkit-scrollbar, .body-read::-webkit-scrollbar, .body-edit::-webkit-scrollbar { width: 6px; }
+.task-list::-webkit-scrollbar-track, .body-read::-webkit-scrollbar-track, .body-edit::-webkit-scrollbar-track { background: transparent; }
+.task-list::-webkit-scrollbar-thumb, .body-read::-webkit-scrollbar-thumb, .body-edit::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18); border-radius: 3px;
+}
+.task-list::-webkit-scrollbar-thumb:hover, .body-read::-webkit-scrollbar-thumb:hover, .body-edit::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.32);
+}

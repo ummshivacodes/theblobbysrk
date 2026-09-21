@@ -80,6 +80,8 @@ src/
     panel.js               open/close animation + window sizing
     screens.js             'main' | 'notes' | 'done'
     hover.js  tooltip.js  rowMenu.js
+    renderGate.js          holds a redraw while the user is mid-gesture (pointer down, or typing in a notes editor)
+    pressGuard.js          a press on a button doesn't pull focus out of an open editor
     views/
       orbView.js  axisView.js  scoreView.js  doneView.js
       inboxView.js         main-screen list
@@ -215,11 +217,27 @@ the plan never stated them, so the code was the only spec):
 - **Notes screen:** search box (focused on open; every word must match title, body or link title) →
   list, newest edit first (title, first body line, "edited 2h ago") → expand to read/edit →
   `↩` back to the dump, right-click → Delete. `Esc` returns to main. Friendly empty state.
-- **Body editor:** empty → textarea at once. Otherwise rendered text (`white-space: pre-wrap`, links
-  clickable); click to edit; blur or `⌘↵` saves; `Esc` cancels (and must not also close the panel).
-  Grows to ~140 px, then scrolls. Saves are also flushed when the panel closes.
-- **Panel must not close mid-sentence:** while an input/textarea inside the panel has focus,
-  mouse-leave does not collapse it. Window blur (clicking another app) flushes edits and collapses.
+- **Body editor:** empty → a textarea at once. Otherwise the text as written (`white-space: pre-wrap`; links
+  clickable from 4d); click it to edit. It **saves as you type** (800 ms after the last keystroke), when focus
+  leaves, and on `⌘↵` or `Esc`. **`Esc` keeps what was typed.** The mockup said "Esc cancel", but in a note taker
+  the costly mistake is silently throwing text away, so there is no cancel; it also does not close the panel.
+  Grows to ~140 px, then scrolls. Leaving an editor is always a blur, so there is one exit path (click
+  elsewhere, another app, the panel folding, `⌘↵`, `Esc`); folding the panel blurs whatever field has focus.
+- **Never redraw under the user.** The page redraws everything on every change, so a change landing
+  mid-gesture would destroy a note being typed or, between mouse-down and mouse-up, swallow a click.
+  `ui/renderGate.js` holds the redraw while the pointer is down or a body editor has focus and draws once when
+  the gesture ends. The composition root defines "held" and signals "ended" (`keyup`, `focusout`, `pointerup`,
+  and the editor's own `blob:edit-ended` event: the browser's `focusout` is fired at a node that is no longer in
+  the page when an editor removes its textarea during blur, so it never reaches the document).
+  `ui/pressGuard.js` stops a press on a button from pulling focus out of an open editor: the editor would
+  close and shrink between mouse-down and mouse-up, the rows below would jump, and the click would land on
+  nothing. The press leaves focus alone; the edit ends after the click's own handler has run. An editor saves one
+  microtask after it ends, so a focus move from one editor to another completes before the save redraws the list.
+- **Panel must not close mid-sentence:** while the user is typing, mouse-leave only postpones the fold; it falls
+  due when they stop (`panel.settle()`, from the same "gesture ended" signal). "Typing" is defined by the
+  composition root: a body editor has focus, or the capture box has text in it. A box that merely has focus does
+  not count (it gets focus after Esc from ⚙ and after the hotkey, and would pin the panel open). A panel opened by
+  the hotkey and never left by the mouse stays open when the window loses focus, as it always did.
 - **Links:** `linkify` → segments → DOM nodes. Never `innerHTML`. Click → `actions.openLink(href)` →
   bridge → main, which validates again (`safeUrl`: http/https only) before `shell.openExternal`.
   The overlay window itself can never navigate: `setWindowOpenHandler(() => ({action:'deny'}))` and
@@ -228,7 +246,9 @@ the plan never stated them, so the code was the only spec):
   and, on success, `store.setLinkTitle(id, url, title)`. Fire-and-forget; failure is silent. The row
   shows the title plus the domain in muted text, else a shortened URL. (Instagram often hides titles
   from non-browsers; the fallback is the normal case there, not an error.)
-- Window size is unchanged: lists scroll inside the fixed 420 px panel.
+- Window size is unchanged: lists scroll inside the fixed 420 px panel. Scrolling areas use a slim scrollbar that
+  takes its own room (`styles/notes.css`): the default overlay scrollbar floats over the → and ✓ buttons, which sit
+  at the right edge of each row.
 
 ## 6. Data safety (notes are worth more than tasks)
 
@@ -268,7 +288,7 @@ next save overwrites everything. `main/persistence.js` fixes that:
 | **1. Modularize the renderer** | `renderer.js` + `taskStore.js` → `src/` ES modules per section 3 (function → module map below). `retagging` becomes view-local; `COLORS` → `ui/theme.js`; frozen snapshots; readiness flag; store tests ported to `test/unit/*.test.mjs` on `node:test`; architecture test added; `build.files` → globs (already done in the prep commit). | `npm run verify` green; Phase-0 test **unchanged** and green; `verify:packaged` green |
 | **2. Modularize main + data safety** | `main.js` → `main/window.js`, `tray.js`, `persistence.js`, `ipc.js`. Section 6. Navigation lockdown. | verify + verify:packaged green; persistence unit tests |
 | **3. Notes in the core** | Section 4: `migrate`, new transitions, `selectors`, `capture`, `linkify`, plus `main/lib/safeUrl` and `titleFromHtml`. No UI change yet. | Unit tests green; UI test still unchanged and green |
-| **4. Notes UI** | In this order, each its own commit with new UI-test checks: **4a** expander + body editor + the don't-close-while-typing rule · **4b** N dot, `⌘↵`, multi-line paste · **4c** Notes screen · **4d** clickable links + `openExternal` · **4e** link titles · **4f** rename a title (double-click; lowest priority) | verify green after each |
+| **4. Notes UI** | In this order, each its own commit with new UI-test checks (in `test/app/notes.electron.js`; `ui.electron.js` stays the unchanged Phase-0 test): **4a** expander + body editor + the don't-close-while-typing rule · **4b** N dot, `⌘↵`, multi-line paste · **4c** Notes screen · **4d** clickable links + `openExternal` · **4e** link titles · **4f** rename a title (double-click; lowest priority) | verify green after each |
 | **5. Ship** | README: Architecture, "Use it", and a short **"How to add a feature"** (which layer, which files). `verify:packaged` → back up `threads.json` → quit Blob → install → relaunch → confirm the window is up and every existing task survived. Refresh `Blob Workbench`. | Owner sees it working |
 
 ### 7a. Parallel lanes (added 2026-09-21)
@@ -352,6 +372,7 @@ Each has a natural home; none blocks the notes work.
 | **Axis labels overlap** once about five threads are open (the axis is a fixed 300 units wide). Idea: label only the hovered/focused bar. | Same | `views/axisView.js` |
 | **Ids can collide** if two items are created in the same millisecond (`Date.now().toString(36)`). Unreachable by typing; matters if a paste ever creates several items at once. | Reading `itemStore.addTask` while porting | `core/itemStore.js`: add a counter or random suffix, with a test |
 | **`Esc` with the right-click menu open also collapses the panel** (both handlers fire). | Writing the UI test (deliberately not asserted) | `ui/app.js` |
+| **⌘Q or a crash while typing can lose up to ~0.8 s of typing** (the autosave interval). Folding, hiding, blurring and quitting through the × button all save first; ⌘Q from the menu gives the page no chance to. | Phase 4a design | `main.js`: a `before-quit` handshake (ask the page to flush, wait briefly) |
 
 ## 11. Progress log and integration notes
 
@@ -394,3 +415,35 @@ Kept current so a new session (or a different model) can pick up exactly where t
   `getLoadNotice()` must derive from the cached one.
 - Test helpers: `deepFreeze` is duplicated in three of lane C's test files; a shared `test/unit/_helpers.mjs`
   would remove that (cosmetic).
+
+**2026-09-22**
+- **Phase 4a done** (see `git log`): the ▸ expander and body editor with autosave, the don't-fold-mid-sentence rule, the
+  redraw gate and press guard, `styles/notes.css`, `test/app/notes.electron.js` (a separate file, so `ui.electron.js` stays the
+  unchanged Phase-0 test and still passes 64/64) with `npm run test:notes`, and 9 unit tests for `renderGate`. Building it
+  found four real bugs, each now covered by a check that goes red if its fix is removed (nine deliberate breakages were
+  applied one at a time and all were caught): the "edit ended" signal was fired from a node the save had already removed
+  from the page; a click made right after typing was lost because the editor shrank between mouse-down and mouse-up (the
+  press guard); moving focus from one editor to another could be destroyed by the first one's save (the microtask save);
+  the overlay scrollbar sat on top of the → and ✓ buttons (slim scrollbar).
+- **A decision for the owner to review:** `Esc` in a notes editor keeps what was typed (the mockup said "Esc cancel"). See section 5.
+
+**Lessons for whoever writes the next Electron test** (learned the hard way: about 150 test launches, most of them
+chasing flakes that were the machine, not the code)
+1. **Seal the window at creation** (`app.on('browser-window-created')`: `setFocusable(false)`, `setIgnoreMouseEvents(true)`).
+   Otherwise a real click or keystroke from the person at the machine lands in it mid-test (seen: a stray "e" typed into a
+   note, a real pointer-down closing an editor). Doing it after the page loads is too late.
+2. **Own the lifecycle events.** macOS emits `hide` (with `isVisible()` still true) when something merely covers the window,
+   and reports the first `show` late. The page reacts by folding the panel or stealing focus, at random moments. Swallow
+   `window-shown` / `window-hidden` in the test (wrap `webContents.send`) and send them explicitly.
+3. **Emulate focus, don't steal it:** `webContents.debugger` + `Emulation.setFocusEmulationEnabled`. `blur()` fires nothing on
+   a page that is not focused, so every focus-dependent check otherwise depends on which window is active.
+4. **Real presses need trusted events** (`webContents.sendInputEvent`). A synthetic `.click()` skips focus changes, so it can
+   never reproduce a click lost to the page shifting under the pointer. After a real press Blink keeps a "mouse is inside"
+   state and fires trusted `mouseenter`s on later layout changes, so run real-pointer checks last and end with `mouseLeave`.
+5. **Wait for the panel's open animation** (`panelSettled`) before measuring anything for a real pointer: `scrollIntoView`
+   during the animation scrolls the panel itself, and the target ends up 200+ px from where you aimed.
+6. **Give a real click somewhere to land:** rows below the target, or the list clamps its scroll position and hides the bug;
+   and aim off-centre of buttons at the right edge (overlay scrollbars).
+7. **Don't loop.** Run each Electron test once, twice at most. A failure that changes from run to run is the environment: get
+   one trace (log `focus()`/`blur()` call stacks, textarea removals, main-process show/hide events), find the cause, fix it
+   once, and stop. Each run puts a window on the owner's screen.
