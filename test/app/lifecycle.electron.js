@@ -1,80 +1,56 @@
-// Electron-level lifecycle test for main.js. Blob is an overlay that runs for days, so the
-// window it lives in has to survive the ways a window can disappear, and still quit when told to:
+// Electron-level lifecycle test for main.js. Blob is an overlay that runs for days, so the window
+// it lives in has to survive the ways a window can disappear, and still quit when told to:
 //   ⌘W (Electron's default menu closes the window), the window being destroyed outright,
 //   the renderer being killed, and a renderer that dies on every load.
 //
 //   npm run test:app
 //
-// Needs a GUI session: it briefly shows a Blob window, a tray icon and a Dock icon (~20 s), so
-// don't type while it runs. Isolated by construction: fixture data in a temp dir and its own
-// userData (which is also where the single-instance lock lives), so it never reads or writes
-// your real threads.json and is safe to run while Blob itself is running.
-const { app, BrowserWindow } = require('electron');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
+// Needs a GUI session: it briefly shows a Blob window, a tray icon and a Dock icon (~20 s), so don't
+// type while it runs. Isolated by construction (see scripts/lib/isolatedApp.js): fixture data and its
+// own profile, never your real threads.json, so it is safe to run while Blob itself is running.
+const { bootIsolatedApp } = require('../../scripts/lib/isolatedApp.js');
+const { sleep, waitFor, createReporter } = require('./harness.js');
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'blob-lifecycle-'));
-fs.mkdirSync(path.join(tmp, 'profile'));
-app.setPath('userData', path.join(tmp, 'profile'));
-process.env.THREAD_AXIS_DATA = path.join(tmp, 'threads.json');
-fs.writeFileSync(process.env.THREAD_AXIS_DATA, JSON.stringify({
-  threads: [{ id: 'fixture1', text: 'fixture thread', quad: 1, status: 'axis', createdAt: 1 }],
-  stats: { listed: 1, done: 0 },
-  history: [],
-}));
+const ctx = bootIsolatedApp({
+  fixture: {
+    threads: [{ id: 'fixture1', text: 'fixture thread', quad: 1, status: 'axis', createdAt: 1 }],
+    stats: { listed: 1, done: 0 },
+    history: [],
+  },
+});
+const { app, BrowserWindow } = ctx;
+const { check, finish } = createReporter({ app, cleanup: ctx.cleanup });
 
-require('../main.js');
+const windows = () => BrowserWindow.getAllWindows();
 
-let failed = 0;
-const check = (name, ok, extra = '') => {
-  if (!ok) failed++;
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? `  (${extra})` : ''}`);
-};
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const waitFor = async (fn, ms = 4000) => {
-  const t0 = Date.now();
-  while (Date.now() - t0 < ms) {
-    if (await fn()) return true;
-    await sleep(100);
-  }
-  return false;
-};
-// "Working" = the page loaded and renderer.js ran (it defines the top-level `store`).
+// "Working" = the page finished its first render (the renderer flags that with <html data-ready="1">).
 const rendererUp = async (w) => {
   if (!w || w.isDestroyed()) return false;
   try {
     return await Promise.race([
-      w.webContents.executeJavaScript('!!document.getElementById("shell") && typeof store === "object"'),
+      w.webContents.executeJavaScript('document.documentElement.dataset.ready === "1"'),
       sleep(2000).then(() => false),
     ]);
   } catch {
     return false;
   }
 };
-const windows = () => BrowserWindow.getAllWindows();
+
 // What a Dock click does; the hotkey, the tray and a second launch all funnel into the same place.
 const dockClick = () => {
   try { app.emit('activate'); return null; } catch (e) { return e.message; }
 };
+
 // Kill the renderer and resolve once main has seen it die (forcefullyCrashRenderer is async).
 const crash = (w) => new Promise((resolve) => {
   w.webContents.once('render-process-gone', (e, d) => resolve(d.reason));
   w.webContents.forcefullyCrashRenderer();
 });
 
-function finish() {
-  console.log(failed ? `\nRESULT: ${failed} check(s) FAILED` : '\nRESULT: all lifecycle checks passed');
-  try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* temp dir; the OS clears it */ }
-  app.exit(failed ? 1 : 0);
-}
-
-setTimeout(() => { check('finished within the watchdog time', false); finish(); }, 90 * 1000);
-
 app.whenReady().then(async () => {
-  await sleep(1500);
+  check('boots with one window and a working renderer',
+    await waitFor(() => windows().length === 1 && rendererUp(windows()[0]), 10000));
   let w = windows()[0];
-  check('boots with one window and a working renderer', windows().length === 1 && await rendererUp(w));
 
   // ⌘W is "Close Window" in Electron's default menu.
   w.close();
@@ -99,12 +75,12 @@ app.whenReady().then(async () => {
   const healed = await waitFor(() => windows().length === 1);
   w = windows()[0];
   check('a Dock click rebuilds a destroyed window', threw === null && healed && w.isVisible(), threw || '');
-  check('…with a working renderer', await waitFor(() => rendererUp(w), 5000));
+  check('…with a working renderer', await waitFor(() => rendererUp(w), 8000));
 
   // The renderer being killed (crash, memory pressure, …).
   const pidBefore = w.webContents.getOSProcessId();
   await crash(w);
-  const recovered = await waitFor(() => rendererUp(w), 6000);
+  const recovered = await waitFor(() => rendererUp(w), 8000);
   check('a killed renderer is reloaded automatically', recovered);
   check('…as a fresh process', recovered && w.webContents.getOSProcessId() !== pidBefore);
 
@@ -112,7 +88,7 @@ app.whenReady().then(async () => {
   const recoveries = [];
   for (let i = 0; i < 2; i++) {
     await crash(w);
-    recoveries.push(await waitFor(() => rendererUp(w), 6000));
+    recoveries.push(await waitFor(() => rendererUp(w), 8000));
   }
   await crash(w);
   await sleep(2500);

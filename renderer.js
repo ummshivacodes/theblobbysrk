@@ -539,4 +539,6 @@ loginToggle.addEventListener('change', async () => {
   loginToggle.checked = !!(await window.threadAxis.setLoginItem(loginToggle.checked));
 });
 
-store.loadState();
+// Readiness flag for tests and tooling: set once the saved state is loaded and drawn, so nothing
+// has to poke this file's globals to know the page is up.
+store.loadState().then(() => { document.documentElement.dataset.ready = '1'; });
