@@ -1,4 +1,5 @@
 import { linkify } from '../../core/linkify.js';
+import { displayTitle } from '../../core/selectors.js';
 import { el, renderSegments } from '../dom.js';
 import { firstLine, fmtAgo } from '../format.js';
 import { COLORS } from '../theme.js';
@@ -125,7 +126,15 @@ export function buildRow(item, { retagging, fresh, expanded = false, autofocusBo
     className: 'task-text',
     title: item.status === 'axis' ? 'Click to focus this thread' : item.text,
   });
-  renderSegments(text, linkify(item.text), { onLink: handlers.openLink });
+  // A title that is just a link reads as the page's title (or the shortened address) with the site beside it, and
+  // opens the link; any other title is shown as written, with whatever links it holds clickable.
+  const shown = displayTitle(item);
+  if (shown.kind === 'link') {
+    renderSegments(text, [{ type: 'link', value: shown.label, href: shown.href }], { onLink: handlers.openLink });
+    if (shown.domain) text.appendChild(el('span', { className: 'link-domain', text: shown.domain }));
+  } else {
+    renderSegments(text, linkify(shown.label), { onLink: handlers.openLink });
+  }
   text.onclick = () => {
     if (item.status === 'axis') handlers.focus(item.id);
     else if (item.status === 'note') handlers.toggleExpand(item.id); // a note's title opens it

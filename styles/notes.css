@@ -115,3 +115,6 @@
   text-decoration-color: rgba(138, 180, 255, 0.4); text-underline-offset: 2px;
 }
 .link:hover, .link:focus-visible { text-decoration-color: currentColor; outline: none; }
+
+/* A link that stands for a page: its title, and the site it is on beside it in a muted colour. */
+.link-domain { margin-left: 6px; font-size: 10px; color: rgba(255, 255, 255, 0.45); }

@@ -1,6 +1,6 @@
 import { svgEl } from '../dom.js';
 import { COLORS } from '../theme.js';
-import { activeThreads } from '../../core/selectors.js';
+import { activeThreads, displayTitle } from '../../core/selectors.js';
 
 // The axis: one bar per open thread. Keyed: each thread keeps its <g> across renders so a CSS
 // transform transition can slide the existing bars over when a new one bundles in.
@@ -79,7 +79,8 @@ export function createAxisView({ svg, count }, actions) {
     const label = svgEl('text', {
       x: 0, y: baseline - barHeight - 8, 'text-anchor': 'middle', class: 'thread-label',
     });
-    label.textContent = t.text.length > 12 ? `${t.text.slice(0, 11)}…` : t.text;
+    const shown = displayTitle(t).label; // a link reads as its page title, not as https://www.…
+    label.textContent = shown.length > 12 ? `${shown.slice(0, 11)}…` : shown;
     g.appendChild(label);
   }
 

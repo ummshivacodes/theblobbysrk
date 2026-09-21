@@ -380,6 +380,7 @@ Each has a natural home; none blocks the notes work.
 | **Axis labels overlap** once about five threads are open (the axis is a fixed 300 units wide). Idea: label only the hovered/focused bar. | Same | `views/axisView.js` |
 | **Ids can collide** if two items are created in the same millisecond (`Date.now().toString(36)`). Unreachable by typing; matters if a paste ever creates several items at once. | Reading `itemStore.addTask` while porting | `core/itemStore.js`: add a counter or random suffix, with a test |
 | **`Esc` with the right-click menu open also collapses the panel** (both handlers fire). | Writing the UI test (deliberately not asserted) | `ui/app.js` |
+| **Links captured before this feature have no page title** (a row shows the tidied address). Titles are only fetched right after a capture, on purpose: fetching every old link at every launch would hit those sites again and again (Instagram never answers with a title). A retro-fetch needs a "tried" marker on the item so each link is attempted once. Also: the ⚙ history rows show the raw text (history entries carry no link title). | Phase 4e design | `ui/linkTitles.js` + one optional field (the plan's sync note applies) |
 | **⌘Q or a crash while typing can lose up to ~0.8 s of typing** (the autosave interval). Folding, hiding, blurring and quitting through the × button all save first; ⌘Q from the menu gives the page no chance to. | Phase 4a design | `main.js`: a `before-quit` handshake (ask the page to flush, wait briefly) |
 
 ## 11. Progress log and integration notes
@@ -452,6 +453,14 @@ Kept current so a new session (or a different model) can pick up exactly where t
   `bridge.links.openExternal` → `main/links.js`, which checks the address again. Enter opens a focused link; a click on a
   link is not also a click on its row or on the notes text around it. The notes test stubs `shell.openExternal` and proves
   the stub works through the real page → main chain before it clicks anything.
+
+- **Phase 4e done** (see `git log`): link titles. `ui/linkTitles.js` (13 unit tests with fakes) asks the main process for
+  the page title after a capture whose whole text is one link, and hands the answer to `store.setLinkTitle`; fire and
+  forget, every failure silent. `displayTitle(item)` in `core/selectors.js` (12 unit tests) decides how a title reads: a
+  bare link is its page title with the site beside it, or the tidied address (no scheme, `www.`, trailing slash, query or
+  fragment) until there is one; rows, axis labels and the blob's tooltip all use it. The notes test fakes `net.fetch` and
+  covers a title, no title, an error, a `www.` address, text that must not be fetched, ⌘↵, search by page title, and a
+  title that arrives while the person is typing in that very row (the case the redraw gate exists for).
 
 **Lessons for whoever writes the next Electron test** (learned the hard way: about 150 test launches, most of them
 chasing flakes that were the machine, not the code)

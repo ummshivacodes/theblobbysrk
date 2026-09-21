@@ -13,7 +13,7 @@
 // blur and focus events do not depend on which window is active. The pointer checks use real (trusted)
 // input events injected straight into the page, which bypass all of that: the bugs they guard against, a
 // click lost to the page shifting under it, cannot be reproduced with synthetic ones.
-const { app: electronApp, shell } = require('electron');
+const { app: electronApp, shell, net } = require('electron');
 const { bootIsolatedApp } = require('../../scripts/lib/isolatedApp.js');
 const { sleep, waitFor, createReporter } = require('./harness.js');
 
@@ -35,6 +35,20 @@ let sendToPage;
 // pre-flight through the real page → main chain) before it clicks a single link.
 const opened = []; // every address the page asked to open
 shell.openExternal = async (url) => { opened.push(url); };
+
+// Nor may it reach the network. The link service fetches page titles through net.fetch, called at call time,
+// so a fake one answers from a table (an address nobody set up gets a page with no title). `hold` makes an
+// answer wait until the test lets it go, to prove what happens while a title is still on its way.
+const fetched = []; // every address the main process was asked to fetch
+const pages = new Map(); // address → { html?, status?, hold?: Promise }
+net.fetch = async (url) => {
+  fetched.push(url);
+  const page = pages.get(url) || {};
+  if (page.hold) await page.hold;
+  return new Response(page.html ?? '<html><head></head><body>no title in here</body></html>', {
+    status: page.status || 200, headers: { 'content-type': 'text/html; charset=utf-8' },
+  });
+};
 
 electronApp.on('browser-window-created', (event, w) => {
   w.setFocusable(false);
@@ -83,7 +97,8 @@ function pageDriver() {
     bubbles: type !== 'mouseenter' && type !== 'mouseleave', cancelable: true, ...init,
   }));
   // Every row helper works on the task list by default, or on another list ('#noteList') when told to.
-  const rowEl = (text, list = '#taskList') => $$(`${list} .task-row`).find((r) => $('.task-text', r).textContent === text) || null;
+  // A row is found by its text, or by its id (a row for a link reads as the page's title, not as its text).
+  const rowEl = (key, list = '#taskList') => $$(`${list} .task-row`).find((r) => r.dataset.id === key || $('.task-text', r).textContent === key) || null;
   const row = (text, list) => need(rowEl(text, list), `row "${text}" in ${list || '#taskList'}`);
   const inRow = (text, sel, list) => need($(sel, row(text, list)), `${sel} in row "${text}"`);
 
@@ -107,6 +122,8 @@ function pageDriver() {
       noteDot: !!$('.note-dot', r),
       chip: $('.tag-chip', r) ? $('.tag-chip', r).textContent : null,
       titleLinks: $$('.task-text .link', r).map((a) => ({ text: a.textContent, title: a.title })),
+      domain: $('.link-domain', r) ? $('.link-domain', r).textContent : null,
+      tip: $('.task-text', r).title,
       bodyLinks: $$('.body-read .link', r).map((a) => ({ text: a.textContent, title: a.title })),
       snippet: $('.note-snippet', r) ? $('.note-snippet', r).textContent : null,
       when: $('.note-when', r) ? $('.note-when', r).textContent : null,
@@ -125,6 +142,7 @@ function pageDriver() {
       capture: { value: $('#taskInput').value, placeholder: $('#taskInput').placeholder, tag: $('#taskInput').tagName },
       badge: { text: $('#notesBtn').textContent, count: $('#notesCount').textContent, pulsing: $('#notesBtn').classList.contains('pulse') },
       dump: $('#taskCount').textContent,
+      bars: $$('#axisSvg g.bar-g').map((g) => ({ id: g.dataset.id, label: $('.thread-label', g).textContent })),
       anchorsWithHref: document.querySelectorAll('a[href]').length,
       path: location.pathname,
       active: active && active !== document.body ? `${active.tagName.toLowerCase()}${active.className ? `.${String(active.className).split(' ')[0]}` : ''}` : null,
@@ -231,7 +249,7 @@ const brief = (s) => s && JSON.stringify({
   rows: s.rows.map((r) => `${r.text} [${r.cls.join(',')}] body=${r.body ? `${r.body.mode}:${JSON.stringify(r.body.value)}` : '-'} ${r.acts.join('')}`),
 });
 const why = (s) => (s ? '' : `timed out; last seen ${brief(last)}`);
-const rowOf = (s, text) => s.rows.find((r) => r.text === text);
+const rowOf = (s, key) => s.rows.find((r) => r.id === key || r.text === key);
 
 const disk = () => ctx.readData();
 const diskItem = (d, id) => d.threads.find((t) => t.id === id);
@@ -457,7 +475,7 @@ app.whenReady().then(async () => {
   s = await act('capture', '', {}); // leave the box empty
 
   // ---- 4c: the Notes screen ---------------------------------------------------------------------------------------------------------------
-  const noteOf = (snap, text) => snap.notes.find((r) => r.text === text);
+  const noteOf = (snap, key) => snap.notes.find((r) => r.id === key || r.text === key);
   const titles = (snap) => snap.notes.map((r) => r.text);
   const noteOnDisk = (d, text) => d.threads.find((t) => t.text === text);
 
@@ -573,6 +591,10 @@ app.whenReady().then(async () => {
   if (!check('(setup) opening a link cannot reach the real browser: the request is caught by the test',
     await waitFor(() => opened.length === 1) && opened[0] === 'https://example.invalid/blob-test-preflight', JSON.stringify(opened))) return finish();
   opened.length = 0;
+  await win.webContents.executeJavaScript(`window.threadAxis.fetchTitle('https://example.invalid/blob-test-preflight')`);
+  if (!check('(setup) fetching a title cannot reach the network: the request is caught by the test',
+    fetched.length === 1 && fetched[0] === 'https://example.invalid/blob-test-preflight', JSON.stringify(fetched))) return finish();
+  fetched.length = 0;
 
   const linkRow = 'read https://example.com/guide now';
   s = await act('capture', linkRow);
@@ -611,15 +633,114 @@ app.whenReady().then(async () => {
   await act('click', '#notesBtn');
   await until((x) => x.screen === 'notes');
   const noteLink = 'https://example.com/from-the-notes-screen';
-  s = await act('noteCapture', noteLink);
-  check('a link that is a note\'s whole title is a link on the Notes screen too', !!noteOf(s, noteLink) && noteOf(s, noteLink).titleLinks.length === 1);
-  s = await act('linkClick', noteLink, 'title', 0, '#noteList');
+  await act('noteCapture', noteLink);
+  await untilDisk((d) => !!noteOnDisk(d, noteLink));
+  const noteLinkId = noteOnDisk(disk(), noteLink).id; // it reads as its tidied address on screen, so find it by id
+  s = await act('snapshot');
+  check('a link that is a note\'s whole title is a link on the Notes screen too', !!noteOf(s, noteLinkId) && noteOf(s, noteLinkId).titleLinks.length === 1);
+  s = await act('linkClick', noteLinkId, 'title', 0, '#noteList');
   check('…clicking it opens the link and does not open the note', await waitFor(() => opened.length === 6)
-    && opened[5] === noteLink && !noteOf(s, noteLink).expander.open, JSON.stringify(opened));
+    && opened[5] === noteLink && !noteOf(s, noteLinkId).expander.open, JSON.stringify(opened));
   await act('pageKey', 'Escape');
   s = await until((x) => x.screen === 'main');
   check('(setup) back on the main screen', !!s, why(s));
   check('nothing else was opened along the way', opened.length === 6, JSON.stringify(opened));
+
+  // ---- 4e: titles for captured links --------------------------------------------------------------------------------------------------------
+  // (Everything from here that reads a page goes through the fake network at the top; the 4d setup proved it.)
+  fetched.length = 0;
+  opened.length = 0;
+  const article = 'https://example.com/article';
+  pages.set(article, { html: '<html><head><title>An Article Worth Reading &amp; Saving</title></head></html>' });
+  pages.set('https://example.com/broken', { status: 500 });
+  pages.set('https://example.com/slow', { html: '<html><head><title>The Slow Page</title></head></html>' });
+  let releaseSlow;
+  pages.get('https://example.com/slow').hold = new Promise((resolve) => { releaseSlow = resolve; });
+  const idOf = async (text) => { await untilDisk((d) => !!noteOnDisk(d, text)); return noteOnDisk(disk(), text).id; };
+
+  // A link with a title.
+  await act('capture', article);
+  const articleId = await idOf(article);
+  s = await until((x) => rowOf(x, articleId) && rowOf(x, articleId).titleLinks[0] && rowOf(x, articleId).titleLinks[0].text === 'An Article Worth Reading & Saving');
+  check('a captured link is fetched and its row reads as the page\'s title, with the site beside it',
+    !!s && rowOf(s, articleId).domain === 'example.com' && fetched.includes(article), why(s));
+  check('…the address is still what is stored, with the title kept beside it (and the edit time recorded)', await untilDisk((d) => {
+    const t = d.threads.find((x) => x.id === articleId);
+    return t.text === article && t.linkTitle === 'An Article Worth Reading & Saving' && typeof t.updatedAt === 'number';
+  }));
+  await act('linkClick', articleId, 'title', 0);
+  check('…and the link in it still opens the address', await waitFor(() => opened.length === 1) && opened[0] === article, JSON.stringify(opened));
+  s = await act('snapshot');
+  check('hovering the row still shows the whole address (its tooltip), whatever the row reads as', rowOf(s, articleId).tip === article, rowOf(s, articleId).tip);
+
+  // The axis shows the page title too, not https://.
+  await act('dotClick', articleId, 2);
+  await act('rowClick', articleId, '.task-act.push');
+  s = await act('snapshot');
+  check('an axis bar for a link is labelled with the page title, not the address', s.bars.some((b) => b.id === articleId && b.label === 'An Article …'), JSON.stringify(s.bars));
+  await act('rowClick', articleId, '.task-act.recall');
+
+  // A page with no title, as Instagram gives a non-browser: the tidied address stands in, quietly.
+  const reel = 'https://www.instagram.com/reel/abc123/';
+  await act('capture', reel);
+  const reelId = await idOf(reel);
+  s = await until((x) => rowOf(x, reelId) && rowOf(x, reelId).titleLinks[0]);
+  check('a link whose page gives no title shows the tidied address, with no site beside it',
+    !!s && rowOf(s, reelId).titleLinks[0].text === 'instagram.com/reel/abc123' && rowOf(s, reelId).domain === null, why(s));
+  check('…it was still asked for one (as the original address)', await waitFor(() => fetched.includes(reel)));
+  check('…and no title was stored (no error, no empty title)', !(await waitFor(() => 'linkTitle' in noteOnDisk(disk(), reel), 400)));
+
+  // Failure is silent.
+  await act('capture', 'https://example.com/broken');
+  const brokenId = await idOf('https://example.com/broken');
+  check('a page that errors is just a link without a title', await waitFor(() => fetched.includes('https://example.com/broken'))
+    && !(await waitFor(() => 'linkTitle' in noteOnDisk(disk(), 'https://example.com/broken'), 400)));
+  s = await act('snapshot');
+  check('…the row still shows the tidied address', rowOf(s, brokenId).titleLinks[0].text === 'example.com/broken');
+
+  // A www. address with no scheme is fetched as https://.
+  await act('capture', 'www.example.org/page');
+  check('an address typed with just www. is fetched as https://', await waitFor(() => fetched.includes('https://www.example.org/page')), JSON.stringify(fetched));
+
+  // Only a title that is nothing but one link is worth asking about.
+  const before = fetched.length;
+  await act('capture', 'see https://example.com/article for details');
+  await act('capture', 'call the vet');
+  check('a title with other words in it, or none, is never fetched', !(await waitFor(() => fetched.length > before, 400)), JSON.stringify(fetched.slice(before)));
+
+  // The case the redraw gate exists for: the title arrives while you are typing in that very row.
+  await act('capture', 'https://example.com/slow');
+  const slowId = await idOf('https://example.com/slow');
+  s = await until((x) => rowOf(x, slowId) && rowOf(x, slowId).titleLinks[0]);
+  check('until a title arrives the row shows the tidied address', !!s && rowOf(s, slowId).titleLinks[0].text === 'example.com/slow', why(s));
+  await act('expander', slowId);
+  s = await until((x) => rowOf(x, slowId).body && rowOf(x, slowId).body.focused);
+  check('(setup) the caret is in that row\'s notes', !!s, why(s));
+  await act('mark', slowId);
+  await act('type', slowId, 'thoughts about this page');
+  releaseSlow(); // the title arrives now, while the person is mid-sentence
+  check('(setup) the title was fetched and saved while the editor was open',
+    await untilDisk((d) => d.threads.find((x) => x.id === slowId).linkTitle === 'The Slow Page'));
+  s = await act('snapshot');
+  check('a title arriving while you type in that row leaves your editor, caret and words alone',
+    await act('isMarked', slowId) && rowOf(s, slowId).body.focused && rowOf(s, slowId).body.value === 'thoughts about this page');
+  check('…the row still shows the address for now (the redraw is waiting for you to finish)', rowOf(s, slowId).titleLinks[0].text === 'example.com/slow');
+  await act('blurActive');
+  s = await until((x) => rowOf(x, slowId).titleLinks[0] && rowOf(x, slowId).titleLinks[0].text === 'The Slow Page');
+  check('…and when you finish it shows the page title, and your words are kept', !!s && rowOf(s, slowId).domain === 'example.com'
+    && rowOf(s, slowId).body.value === 'thoughts about this page', why(s));
+
+  // A link filed with ⌘↵ becomes a note that can be found by its page title.
+  await act('capture', article, { metaKey: true });
+  await act('click', '#notesBtn');
+  await until((x) => x.screen === 'notes');
+  s = await act('search', 'worth reading');
+  check('a note that is a link can be found by the words in its page title',
+    s.notes.length >= 1 && s.notes.every((r) => r.titleLinks[0] && r.titleLinks[0].text === 'An Article Worth Reading & Saving'), JSON.stringify(s.notes.map((r) => r.titleLinks)));
+  await act('search', '');
+  await act('pageKey', 'Escape');
+  s = await until((x) => x.screen === 'main');
+  check('(setup) back on the main screen', !!s, why(s));
 
   // ---- a real press on a button while an editor has focus ---------------------------------------------------------------------
   // Typing a note, then clicking ✓ on the row below it, must work with ONE click. If the press pulled focus

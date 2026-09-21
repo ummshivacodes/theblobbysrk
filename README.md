@@ -83,6 +83,13 @@ npm start
   clickable and open in your default browser (Enter on a focused link works
   too). Only web addresses count: `javascript:`, `file:`, `mailto:` and bare
   domains stay plain text, on purpose.
+- **A link on its own** (dumped with Enter or saved with ⌘↵) is looked up: once
+  the page's title arrives the row reads as that title with the site beside it
+  in grey. Until then, and for sites that hide their title from anything but a
+  browser (Instagram often does), it reads as the address tidied up
+  (`instagram.com/reel/abc…`, no `https://www.`). Hover the row for the whole
+  address; click the link to open it. The axis labels and the blob's tooltip use
+  the same name. It never blocks you: no title is not an error.
 - **▸ on any row** opens its notes: room for more than a title. A row with no
   notes opens a text box with the cursor in it; otherwise you see the text as
   written, and clicking it edits. It saves as you type (a moment after you
@@ -108,9 +115,9 @@ step: `index.html` loads one entry point, `src/ui/app.js`.
 
 | Where | Role | May import |
 |---|---|---|
-| `src/core/` | Pure logic. `itemStore.js`: the item state machine — tasks (`addTask`, `tagTask`, `dispatchToAxis`, `recallToDump`, `resolveThread`, `reopenTask`) and notes (`addNote`, `fileAsNote`, `unfileNote`, `setBody`, `setText`, `setLinkTitle`), plus `deleteItem` and `toggleFocus` for either. `selectors.js`, `capture.js`, `linkify.js`, `migrate.js` (schema v2). No DOM, no Electron, no I/O: persistence and the change callback are injected. It runs in plain Node, which is where it is tested, and a phone app could reuse it unchanged. The UI calls `setBody` (the notes editor), `addNote` (⌘↵, the Notes screen's box), `fileAsNote` (the N dot) and `unfileNote` (↩); links (`setLinkTitle`, `setText`) arrive with the rest of Phase 4. | only other `src/core/` files |
+| `src/core/` | Pure logic. `itemStore.js`: the item state machine — tasks (`addTask`, `tagTask`, `dispatchToAxis`, `recallToDump`, `resolveThread`, `reopenTask`) and notes (`addNote`, `fileAsNote`, `unfileNote`, `setBody`, `setText`, `setLinkTitle`), plus `deleteItem` and `toggleFocus` for either. `selectors.js` (including `displayTitle`: how an item's title reads, e.g. a link as its page title), `capture.js`, `linkify.js`, `migrate.js` (schema v2). No DOM, no Electron, no I/O: persistence and the change callback are injected. It runs in plain Node, which is where it is tested, and a phone app could reuse it unchanged. The UI calls `setBody` (the notes editor), `addNote` (⌘↵, the Notes screen's box), `fileAsNote` (the N dot) and `unfileNote` (↩); links (`setLinkTitle`, `setText`) arrive with the rest of Phase 4. | only other `src/core/` files |
 | `src/ui/views/` | One file per thing on screen: `orbView`, `axisView`, `inboxView`, `scoreView`, `doneView`, plus `itemRow` (one row), `bodyEditor` (an item's notes: read text ↔ textarea), `notesView` (the Notes screen) and `notesBadgeView` (the header's N and its count). A view is `createXView(elements, actions)` returning `{ render(snapshot, ui), applyHover?(id) }`. It draws from a **frozen snapshot** and reports what the user did through `actions`. It can't reach the store or the bridge. | `ui/dom`, `ui/theme`, `ui/format`, `views/itemRow`, `views/bodyEditor`, `core/selectors`, `core/linkify` |
-| `src/ui/` | The page's machinery, one job per file: `bridge` (the only file that reads `window.threadAxis`), `snapshot`, `hover`, `panel` (fold-out animation + window sizing), `renderGate` (holds a redraw while the user is mid-gesture), `pressGuard` (a press on a button doesn't pull focus out of an open editor), `captureBox` (what a key in the capture box means: Enter, ⌘↵, several lines, input methods; a pure function, unit-tested), `screens` (main / Notes / ⚙), `tooltip`, `rowMenu`, `dom`, `format`, `theme`. | each other, sparingly |
+| `src/ui/` | The page's machinery, one job per file: `bridge` (the only file that reads `window.threadAxis`), `snapshot`, `hover`, `panel` (fold-out animation + window sizing), `renderGate` (holds a redraw while the user is mid-gesture), `pressGuard` (a press on a button doesn't pull focus out of an open editor), `captureBox` (what a key in the capture box means: Enter, ⌘↵, several lines, input methods; a pure function, unit-tested), `linkTitles` (asks for a captured link's page title, fire and forget, unit-tested with fakes), `screens` (main / Notes / ⚙), `tooltip`, `rowMenu`, `dom`, `format`, `theme`. | each other, sparingly |
 | `src/ui/app.js` | The composition root. Looks up the page's elements (the only file that knows the ids in `index.html`), creates the store and the views, and hands each only the elements and actions it needs. | everything in `src/` |
 | `style.css`, `styles/` | Styling. `style.css` is the original; each new feature adds a file under `styles/` (loaded after it by `index.html`) instead of growing it. | – |
 | `preload.js` | The only bridge between the page and Electron (IPC): `window.threadAxis`. | Electron |
@@ -195,9 +202,9 @@ npm run test:notes
 ```
 The same kind of test for the notes UI (the ▸ expander and body editor, the N
 dot, ⌘↵ and multi-line capture, the Notes screen: search, editing, back to
-the dump, delete, the new-note box, and links). It stubs `shell.openExternal`, so
-no test ever opens your real browser, and it proves the stub works before it
-clicks a link. It is a separate file
+the dump, delete, the new-note box, and links). It stubs `shell.openExternal` and
+`net.fetch`, so no test opens your real browser or reaches the network, and it
+proves both stubs work before it clicks a link. It is a separate file
 on purpose: `test:ui` pins today's behaviour and stays unchanged, this one grows
 with the feature. It covers typing, autosave, ⌘↵ and Esc, the redraw being held
 while you type, the panel not folding mid-sentence, hiding the window while

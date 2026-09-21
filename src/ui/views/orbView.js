@@ -1,6 +1,6 @@
 import { el } from '../dom.js';
 import { COLORS } from '../theme.js';
-import { activeThreads } from '../../core/selectors.js';
+import { activeThreads, displayTitle } from '../../core/selectors.js';
 
 // The blob: one glass orb for all open threads, with a coloured core dot per thread (up to four,
 // then a "+n"). No open threads shows a dashed ghost orb.
@@ -31,7 +31,7 @@ export function createOrbView({ bar }, actions) {
     const score = `${active.length} active · ${snapshot.stats.done}/${snapshot.stats.listed} done`;
     const tip = active.length === 0
       ? score
-      : `${score}  —  ${active.map((t) => t.text).join(' · ')}`;
+      : `${score}  —  ${active.map((t) => displayTitle(t).label).join(' · ')}`;
     blob.addEventListener('mouseenter', () => actions.showTooltip(blob, tip));
     blob.addEventListener('mouseleave', () => actions.hideTooltip());
     blob.addEventListener('click', (e) => {

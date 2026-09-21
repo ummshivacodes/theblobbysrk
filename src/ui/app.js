@@ -6,6 +6,7 @@ import { createItemStore } from '../core/itemStore.js';
 import { createBridge } from './bridge.js';
 import { createCaptureBox } from './captureBox.js';
 import { createHover } from './hover.js';
+import { createLinkTitles } from './linkTitles.js';
 import { createPanel } from './panel.js';
 import { installPressGuard } from './pressGuard.js';
 import { createRenderGate } from './renderGate.js';
@@ -90,6 +91,12 @@ const actions = {
   },
 };
 
+// Titles for captured links: fire and forget, a nicety (see ui/linkTitles.js).
+const linkTitles = createLinkTitles({
+  fetchTitle: (href) => bridge.links.fetchTitle(href),
+  setLinkTitle: (id, url, title) => store.setLinkTitle(id, url, title),
+});
+
 // ---- views ---------------------------------------------------------------------------------
 const orb = createOrbView({ bar: $('orbBar') }, pick(actions, ['showTooltip', 'hideTooltip', 'openFromBlob']));
 const axis = createAxisView({ svg: $('axisSvg'), count: $('axisCount') }, pick(actions, ['resolve', 'hover']));
@@ -168,7 +175,7 @@ createCaptureBox($('noteInput'), {
   enterMeansNote: true,
   onCapture({ text, body }) {
     notes.clearSearch();
-    store.addNote(text, body);
+    linkTitles.request(store.addNote(text, body), text);
   },
 });
 
@@ -176,13 +183,15 @@ createCaptureBox($('noteInput'), {
 createCaptureBox(input, {
   onCapture({ text, body, asNote }) {
     if (asNote) {
-      store.addNote(text, body); // it lands on the header's N button, which pulses (see notesBadgeView)
+      // It lands on the header's N button, which pulses (see notesBadgeView).
+      linkTitles.request(store.addNote(text, body), text);
       return;
     }
     const id = store.addTask(text, body);
     // addTask already rendered once (through onChange) before it returned the id, so draw the list once
     // more with the new row highlighted and scrolled into view.
     inbox.render(takeSnapshot(store.state), { hoveredId: hover.get(), freshId: id });
+    linkTitles.request(id, text);
   },
 });
 
