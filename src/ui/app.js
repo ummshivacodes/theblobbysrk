@@ -4,15 +4,23 @@
 // belongs in a module of its own.
 import { createItemStore } from '../core/itemStore.js';
 import { createBridge } from './bridge.js';
+import { createCaptureBox } from './captureBox.js';
 import { createHover } from './hover.js';
+import { createLinkTitles } from './linkTitles.js';
+import { createNotice, describeLoadNotice, SAVE_FAILED } from './notice.js';
 import { createPanel } from './panel.js';
+import { installPressGuard } from './pressGuard.js';
+import { createRenderGate } from './renderGate.js';
 import { createRowMenu } from './rowMenu.js';
 import { createScreens } from './screens.js';
 import { takeSnapshot } from './snapshot.js';
 import { createTooltip } from './tooltip.js';
 import { createAxisView } from './views/axisView.js';
 import { createDoneView } from './views/doneView.js';
+import { EDIT_ENDED } from './views/bodyEditor.js';
 import { createInboxView } from './views/inboxView.js';
+import { createNotesBadgeView } from './views/notesBadgeView.js';
+import { createNotesView } from './views/notesView.js';
 import { createOrbView } from './views/orbView.js';
 import { createScoreView } from './views/scoreView.js';
 
@@ -25,14 +33,16 @@ const input = $('taskInput');
 
 // ---- infrastructure ------------------------------------------------------------------------
 const tooltip = createTooltip({ el: $('tooltip'), shell });
+const notice = createNotice({ bar: $('notice'), text: $('noticeText'), close: $('noticeClose') });
 const rowMenu = createRowMenu({ el: $('rowMenu'), shell });
 
 const screens = createScreens(
-  { main: $('mainScreen'), done: $('doneScreen'), gearBtn: $('gearBtn') },
+  { main: $('mainScreen'), notes: $('notesScreen'), done: $('doneScreen'), gearBtn: $('gearBtn'), notesBtn: $('notesBtn') },
   {
     onChange(name) {
       rowMenu.hide();
       if (name === 'main') setTimeout(() => input.focus(), 0);
+      if (name === 'notes') setTimeout(() => notes.open(), 0);
     },
   },
 );
@@ -41,10 +51,15 @@ const panel = createPanel({
   shell,
   panel: $('panel'),
   windowCtl: bridge.windowCtl,
+  // Mid-sentence: a body is being edited, or a box has something typed in it. (A box that merely has
+  // focus, empty, has nothing to lose: it must not keep the panel from folding.)
+  isTyping: () => editingBody() || typedIn.some((box) => document.activeElement === box && box.value.trim() !== ''),
   onCollapse() {
     tooltip.hide();
     hover.set(null);
-    input.blur();
+    // Whatever field has focus (the capture box, a body being edited) lets go. Editors save when they
+    // blur, so folding the panel never leaves a half-typed note behind.
+    if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
     if (screens.current() !== 'main') screens.show('main');
   },
 });
@@ -59,6 +74,16 @@ const actions = {
   resolve: (id) => store.resolveThread(id),
   reopen: (id) => store.reopenTask(id),
   focus: (id) => store.toggleFocus(id),
+  setBody: (id, body) => store.setBody(id, body),
+  fileNote: (id) => store.fileAsNote(id),
+  unfile: (id) => store.unfileNote(id),
+  // A rename that made the title a link asks for that page's title too (as a capture does).
+  rename: (id, text) => {
+    store.setText(id, text);
+    linkTitles.request(id, text);
+  },
+  // Fire and forget: the main process checks the address and hands it to the browser.
+  openLink: (href) => { Promise.resolve(bridge.links.openExternal(href)).catch(() => {}); },
   remove: (id) => {
     if (hover.get() === id) hover.set(null); // a deleted row can't stay hovered
     store.deleteItem(id);
@@ -73,13 +98,28 @@ const actions = {
   },
 };
 
+// Titles for captured links: fire and forget, a nicety (see ui/linkTitles.js).
+const linkTitles = createLinkTitles({
+  fetchTitle: (href) => bridge.links.fetchTitle(href),
+  setLinkTitle: (id, url, title) => store.setLinkTitle(id, url, title),
+});
+
 // ---- views ---------------------------------------------------------------------------------
 const orb = createOrbView({ bar: $('orbBar') }, pick(actions, ['showTooltip', 'hideTooltip', 'openFromBlob']));
 const axis = createAxisView({ svg: $('axisSvg'), count: $('axisCount') }, pick(actions, ['resolve', 'hover']));
 const inbox = createInboxView(
   { list: $('taskList'), count: $('taskCount') },
-  pick(actions, ['tag', 'push', 'recall', 'resolve', 'reopen', 'focus', 'remove', 'hover', 'openMenu']),
+  pick(actions, ['tag', 'push', 'recall', 'resolve', 'reopen', 'focus', 'remove', 'setBody', 'fileNote', 'openLink', 'rename', 'hover', 'openMenu']),
 );
+const notes = createNotesView(
+  { search: $('notesSearch'), list: $('noteList'), count: $('noteCount') },
+  pick(actions, ['unfile', 'remove', 'setBody', 'openLink', 'rename', 'openMenu']),
+);
+const notesBadge = createNotesBadgeView({ button: $('notesBtn'), count: $('notesCount') });
+
+// Is a notes editor being typed in, on either list? And which boxes count as "typed in" when they have text.
+const editingBody = () => inbox.isEditing() || notes.isEditing();
+const typedIn = [input, $('noteInput'), $('notesSearch')];
 const score = createScoreView({ done: $('doneCount'), listed: $('listedCount'), active: $('activeCount') });
 const done = createDoneView(
   {
@@ -94,36 +134,89 @@ const done = createDoneView(
 const hover = createHover([orb, axis, inbox]);
 
 // ---- render: every change redraws everything from a frozen copy of the state -----------------
-function render() {
+function drawAll() {
   const snapshot = takeSnapshot(store.state);
   const ui = { hoveredId: hover.get(), freshId: null };
   orb.render(snapshot, ui);
   axis.render(snapshot, ui);
   inbox.render(snapshot, ui);
+  notes.render(snapshot);
   score.render(snapshot);
+  notesBadge.render(snapshot);
   done.render(snapshot);
   panel.syncSize();
 }
 
-// A save that fails (disk full, permissions) must not be silent. For now it is logged; the Notes work
-// shows it to the user in a notice bar, which is where getLoadNotice's recovery message will go too.
-store = createItemStore(bridge.persistence, render, {
-  onSaveError: (err) => console.error('[blob] could not save:', err),
+// Nothing is redrawn under the user's hands: not while a mouse button is down (a redraw between
+// mouse-down and mouse-up swallows the click, and saving an edit on blur happens exactly then), and not
+// while they are typing in a body editor (it would destroy the text and the caret). The redraw waits
+// and happens once, at the end of the gesture. See ui/renderGate.js.
+const POINTER_HOLD_MAX_MS = 5000; // a press that never reports its release must not freeze the page
+let pointerDownAt = 0;
+const pointerHeld = () => pointerDownAt > 0 && Date.now() - pointerDownAt < POINTER_HOLD_MAX_MS;
+const gate = createRenderGate({ draw: drawAll, isHeld: () => pointerHeld() || editingBody() });
+
+// Any of these can be the end of a gesture: a held redraw may be due, and a postponed fold of the panel
+// (the mouse left while the user was typing). Both just ask again whether they are still held; the ones
+// that end nothing change nothing. EDIT_ENDED is ours, because focusout is not reliable when an editor
+// swaps its own textarea out during blur.
+const settleSoon = () => setTimeout(() => { gate.release(); panel.settle(); }, 0); // after the click/blur has run
+document.addEventListener('pointerdown', () => { pointerDownAt = Date.now(); }, true);
+['pointerup', 'pointercancel'].forEach((type) =>
+  document.addEventListener(type, () => { pointerDownAt = 0; settleSoon(); }, true));
+['keyup', 'focusout', EDIT_ENDED].forEach((type) => document.addEventListener(type, settleSoon, true));
+
+// Pressing a button while a body is being edited must not pull focus out of it (see ui/pressGuard.js).
+installPressGuard({ root: shell, isEditing: editingBody });
+
+// A save that fails (disk full, permissions) is never silent: the notice bar says so, and it goes away by itself
+// the next time a save succeeds (the store keeps the change in memory and saves everything again on the next
+// change, so a failure heals itself). The port the store gets is the bridge's, watched for successes.
+const persistence = {
+  loadThreads: () => bridge.persistence.loadThreads(),
+  saveThreads: (data) => Promise.resolve(bridge.persistence.saveThreads(data)).then((saved) => {
+    notice.clear('save');
+    return saved;
+  }),
+};
+store = createItemStore(persistence, gate.request, {
+  onSaveError: (err) => {
+    console.error('[blob] could not save:', err);
+    notice.show('save', SAVE_FAILED);
+  },
 });
 
 // ---- wiring --------------------------------------------------------------------------------
-input.addEventListener('keydown', (e) => {
-  if (e.key !== 'Enter' || !e.target.value.trim()) return;
-  const id = store.addTask(e.target.value.trim());
-  // addTask already rendered once (through onChange) before it returned the id, so draw the list once
-  // more with the new row highlighted and scrolled into view.
-  inbox.render(takeSnapshot(store.state), { hoveredId: hover.get(), freshId: id });
-  e.target.value = '';
+// The Notes screen's own box: everything typed there is a note (a note added while a search is showing would
+// be hidden by it, so the search is cleared first).
+createCaptureBox($('noteInput'), {
+  enterMeansNote: true,
+  onCapture({ text, body }) {
+    notes.clearSearch();
+    linkTitles.request(store.addNote(text, body), text);
+  },
+});
+
+// Enter dumps a task, ⌘↵ saves a note; several lines become a title and its notes (see ui/captureBox.js).
+createCaptureBox(input, {
+  onCapture({ text, body, asNote }) {
+    if (asNote) {
+      // It lands on the header's N button, which pulses (see notesBadgeView).
+      linkTitles.request(store.addNote(text, body), text);
+      return;
+    }
+    const id = store.addTask(text, body);
+    // addTask already rendered once (through onChange) before it returned the id, so draw the list once
+    // more with the new row highlighted and scrolled into view.
+    inbox.render(takeSnapshot(store.state), { hoveredId: hover.get(), freshId: id });
+    linkTitles.request(id, text);
+  },
 });
 
 $('hideBtn').addEventListener('click', () => bridge.windowCtl.hide());
 $('quitBtn').addEventListener('click', () => bridge.windowCtl.quit());
-$('gearBtn').addEventListener('click', () => screens.show(screens.current() === 'main' ? 'done' : 'main'));
+$('gearBtn').addEventListener('click', () => screens.show(screens.current() === 'done' ? 'main' : 'done'));
+$('notesBtn').addEventListener('click', () => screens.show(screens.current() === 'notes' ? 'main' : 'notes'));
 $('backBtn').addEventListener('click', () => screens.show('main'));
 
 // Hotkey reveal: open with the input ready. Hidden: drop to ambient, so the next reveal starts from
@@ -143,4 +236,12 @@ document.addEventListener('keydown', (e) => {
 
 // Readiness flag for tests and tooling: set once the saved state is loaded and drawn, so nothing has
 // to poke this app's internals to know the page is up.
-store.loadState().then(() => { document.documentElement.dataset.ready = '1'; });
+store.loadState().then(() => {
+  document.documentElement.dataset.ready = '1';
+  // The main process may have had to restore the backup to load at all: say so (after the load, which is
+  // when it finds out).
+  return bridge.persistence.getLoadNotice();
+}).then((loadNotice) => {
+  const message = describeLoadNotice(loadNotice);
+  if (message) notice.show('load', message);
+}).catch((err) => console.error('[blob] could not read the load notice:', err));

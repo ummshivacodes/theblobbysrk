@@ -403,9 +403,12 @@ const IPC = 'main/ipc.js';
 const PRELOAD = 'preload.js';
 
 // A view may import ONLY these files (resolved paths). Everything else it needs is handed to it.
+// (titleEditor was added with the rename feature: like bodyEditor it is one more editor a row uses, and it too
+// is handed everything it needs. The rule keeps views from reaching the store or the bridge; it is not there to
+// freeze the list of view files.)
 const VIEW_ALLOWED_IMPORTS = new Set([
   'src/ui/dom.js', 'src/ui/theme.js', 'src/ui/format.js',
-  'src/ui/views/itemRow.js', 'src/ui/views/bodyEditor.js',
+  'src/ui/views/itemRow.js', 'src/ui/views/bodyEditor.js', 'src/ui/views/titleEditor.js',
   'src/core/selectors.js', 'src/core/linkify.js',
 ]);
 
@@ -462,7 +465,7 @@ function viewsIsolation(ctx, report) {
       const target = resolveImport(file, imp.specifier);
       if (target.kind === 'relative' && VIEW_ALLOWED_IMPORTS.has(target.path)) continue;
       report(file, `${describeImport(imp, target)}. Views may import only ui/dom, ui/theme, ui/format, views/itemRow, `
-        + 'views/bodyEditor, core/selectors and core/linkify. They receive data and actions as arguments; ui/app.js does the wiring '
+        + 'views/bodyEditor, views/titleEditor, core/selectors and core/linkify. They receive data and actions as arguments; ui/app.js does the wiring '
         + '(never import core/itemStore or ui/bridge from a view).', imp.line);
     }
   }

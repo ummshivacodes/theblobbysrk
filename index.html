@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'" />
   <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="styles/notes.css" />
 </head>
 <body>
   <!-- The shell is the only thing the window ever needs to be as big as.
@@ -19,10 +20,16 @@
           <span class="title">Blob</span>
           <span class="hotkey-hint">⌘⇧Y</span>
           <div class="win-actions">
+            <button id="notesBtn" class="icon-btn notes-btn" title="Notes" aria-label="Notes"><span class="notes-letter">N</span><span id="notesCount" class="notes-count"></span></button>
             <button id="gearBtn" class="icon-btn gear" title="Crossed off &amp; settings">⚙</button>
             <button id="hideBtn" class="icon-btn" title="Hide (⌘⇧Y, the menu bar blob, or the Dock icon brings it back)">–</button>
             <button id="quitBtn" class="icon-btn" title="Quit">×</button>
           </div>
+        </div>
+
+        <div id="notice" class="notice" role="status" hidden>
+          <span id="noticeText" class="notice-text"></span>
+          <button id="noticeClose" class="notice-close" title="Dismiss" aria-label="Dismiss">×</button>
         </div>
 
         <div id="mainScreen" class="screen active">
@@ -38,9 +45,20 @@
         </div>
 
         <div class="quick-add">
-          <input id="taskInput" type="text" placeholder="dump a task… (tag it after)" autofocus />
+          <textarea id="taskInput" rows="1" spellcheck="false" placeholder="dump a task or a thought…   ⌘↵ = note" autofocus></textarea>
         </div>
         </div><!-- /mainScreen -->
+
+        <div id="notesScreen" class="screen">
+          <div class="notes-head">
+            <input id="notesSearch" type="search" placeholder="search notes…" autocomplete="off" spellcheck="false" />
+          </div>
+          <div class="section-label">Notes <span id="noteCount">(0)</span></div>
+          <div id="noteList" class="task-list"></div>
+          <div class="quick-add">
+            <textarea id="noteInput" rows="1" spellcheck="false" placeholder="new note…   ↵ saves"></textarea>
+          </div>
+        </div><!-- /notesScreen -->
 
         <div id="doneScreen" class="screen">
           <div class="done-head">

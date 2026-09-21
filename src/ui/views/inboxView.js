@@ -1,16 +1,20 @@
 import { inboxItems } from '../../core/selectors.js';
+import { createOpenBodies, isEditingIn } from './bodyEditor.js';
 import { buildRow } from './itemRow.js';
+import { createRename } from './titleEditor.js';
 
 // The main list ("Task dump"): every item that isn't a note, oldest first, each with the controls
-// that fit its status. Owns the one piece of UI state that used to be smuggled onto the data itself:
-// which rows are being retagged.
+// that fit its status. Owns the UI state that must not live on the data: which rows are being retagged
+// and which are expanded to show their body.
 //   els = { list, count }
-//   actions = { tag, push, recall, resolve, reopen, focus, remove, hover, openMenu(x, y, entries) }
+//   actions = { tag, push, recall, resolve, reopen, focus, remove, setBody, fileNote, openLink, rename, hover, openMenu(x, y, entries) }
 const clip = (text) => (text.length > 24 ? `${text.slice(0, 23)}…` : text);
 
 export function createInboxView({ list, count }, actions) {
   const retagging = new Set(); // ids whose chip was clicked and now show the four dots again
-  let last = null;             // the latest render, so a retag click can redraw just this list
+  const openBodies = createOpenBodies(); // which rows have their ▸ open, so their body shows under the row
+  const renaming = createRename();       // which row's title is a text box right now
+  let last = null;             // the latest render, so a click here can redraw just this list
 
   // Right-click entries for one item: Reopen (crossed off only) and Delete.
   function menuEntries(item) {
@@ -25,6 +29,13 @@ export function createInboxView({ list, count }, actions) {
   const handlers = {
     tag: (id, q) => { retagging.delete(id); actions.tag(id, q); },
     startRetag: (id) => { retagging.add(id); redraw(); },
+    toggleExpand: (id) => { openBodies.toggle(id); redraw(); },
+    saveBody: actions.setBody,
+    fileNote: actions.fileNote,
+    openLink: actions.openLink,
+    rename: actions.rename,
+    startRename: (id) => { renaming.begin(id); redraw(); },
+    endRename: () => { renaming.end(); redraw(); },
     push: actions.push,
     recall: actions.recall,
     resolve: actions.resolve,
@@ -40,17 +51,25 @@ export function createInboxView({ list, count }, actions) {
     const items = inboxItems(snapshot);
     const present = new Set(items.map((item) => item.id));
     retagging.forEach((id) => { if (!present.has(id)) retagging.delete(id); });
+    openBodies.prune(present);
+    renaming.prune(present);
+    const autofocus = openBodies.takeAutofocus();
 
+    // Clearing the list collapses it, which throws the scroll position away: keep it.
+    const scrolled = list.scrollTop;
     count.textContent = `(${items.length})`;
     list.innerHTML = '';
     items.forEach((item) => {
       list.appendChild(buildRow(item, {
         retagging: retagging.has(item.id),
         fresh: item.id === ui.freshId,
+        expanded: openBodies.isOpen(item.id),
+        autofocusBody: item.id === autofocus,
+        renaming: renaming.isRenaming(item.id),
         handlers,
       }));
     });
-    if (ui.freshId) list.scrollTop = list.scrollHeight;
+    list.scrollTop = ui.freshId ? list.scrollHeight : scrolled;
   }
 
   function redraw() {
@@ -64,5 +83,8 @@ export function createInboxView({ list, count }, actions) {
     });
   }
 
-  return { render, applyHover };
+  // Is the user typing in one of this list's body editors? (Then it must not be redrawn under them.)
+  const isEditing = () => isEditingIn(list);
+
+  return { render, applyHover, isEditing };
 }

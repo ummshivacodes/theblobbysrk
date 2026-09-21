@@ -1,0 +1,141 @@
+/* Notes: the expander, the body editor, and (later in this file) the Notes screen.
+   Loaded after style.css, which stays as it was. */
+
+:root {
+  --note: #b9a8ff;            /* the note colour: the N dot, a row that has a body, the Notes button */
+  --note-soft: rgba(185, 168, 255, 0.45);
+  --body-max: 140px;          /* a body grows to this height, then scrolls */
+}
+
+/* A row can now carry a body under it, so its contents wrap onto a second line. The title still takes
+   whatever room is left on the first line (its flex-basis is 0, so it never causes a wrap itself). */
+.task-row { flex-wrap: wrap; }
+
+/* ▸ opens the body. Dim when there is nothing to read, violet when there is. */
+.row-expander {
+  flex: none; width: 16px; height: 18px; padding: 0; margin-left: -2px;
+  border: none; border-radius: 4px; background: transparent;
+  color: rgba(255, 255, 255, 0.28); font-size: 10px; line-height: 18px; cursor: pointer;
+  transition: transform 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+.row-expander:hover { color: rgba(255, 255, 255, 0.75); background: rgba(255, 255, 255, 0.08); }
+.row-expander.has-body { color: var(--note); }
+.row-expander.open { transform: rotate(90deg); }
+
+/* The body area takes a whole line under the row, indented past the expander. */
+.body-area { flex: 0 0 100%; padding: 3px 0 4px 18px; }
+
+.body-read {
+  font-size: 11px; line-height: 1.45; color: rgba(255, 255, 255, 0.8);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  max-height: var(--body-max); overflow-y: auto;
+  padding: 4px 6px; border-radius: 5px; cursor: text;
+}
+.body-read:hover { background: rgba(255, 255, 255, 0.05); }
+.body-read.empty { color: rgba(255, 255, 255, 0.35); font-style: italic; cursor: default; }
+
+.body-edit {
+  display: block; width: 100%; resize: none;
+  field-sizing: content;                   /* grows with what is typed... */
+  min-height: 52px; max-height: var(--body-max); overflow-y: auto; /* ...up to a limit, then scrolls */
+  padding: 6px 8px; border-radius: 6px;
+  font-size: 11px; line-height: 1.45; color: #fff;
+  background: rgba(255, 255, 255, 0.06); border: 1px solid var(--note-soft); outline: none;
+}
+.body-edit:focus { border-color: var(--note); }
+.body-edit::placeholder { color: rgba(255, 255, 255, 0.35); }
+.body-hint { margin-top: 3px; font-size: 9px; text-align: right; opacity: 0.4; }
+
+/* Scrollbars that take their own room. The default overlay scrollbar floats over the right-hand edge
+   of a scrolling area, which is exactly where each row's → and ✓ buttons are: with an editor open the
+   list scrolls, and the scrollbar would sit on top of them. A slim one beside the rows cannot. */
+.task-list::-webkit-scrollbar, .body-read::-webkit-scrollbar, .body-edit::-webkit-scrollbar { width: 6px; }
+.task-list::-webkit-scrollbar-track, .body-read::-webkit-scrollbar-track, .body-edit::-webkit-scrollbar-track { background: transparent; }
+.task-list::-webkit-scrollbar-thumb, .body-read::-webkit-scrollbar-thumb, .body-edit::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18); border-radius: 3px;
+}
+.task-list::-webkit-scrollbar-thumb:hover, .body-read::-webkit-scrollbar-thumb:hover, .body-edit::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.32);
+}
+
+/* ---------- Capture box: a textarea that looks like the one-line input it replaced ---------- */
+/* Same colours and padding as before (style.css). It grows with what is typed or pasted, up to four lines. */
+.quick-add textarea {
+  display: block; resize: none; font-family: inherit;
+  field-sizing: content; line-height: 1.3; max-height: 84px; overflow-y: auto;
+}
+.quick-add textarea::placeholder { color: rgba(255, 255, 255, 0.4); }
+.quick-add textarea::-webkit-scrollbar { width: 6px; }
+.quick-add textarea::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.18); border-radius: 3px; }
+
+/* ---------- The N dot on a row (files it as a note) ---------- */
+.note-dot {
+  width: 19px; height: 19px; margin-left: 3px; padding: 0; border-radius: 50%;
+  border: 1px solid var(--note-soft); background: transparent; color: var(--note);
+  font-size: 8px; font-weight: 700; line-height: 17px; cursor: pointer;
+}
+.note-dot:hover { color: #1a1530; border-color: var(--note); background: var(--note); }
+
+/* ---------- Header: the N button, its count, and the pulse when a note arrives ---------- */
+.notes-btn { width: auto; min-width: 20px; padding: 0 5px; font-size: 12px; font-weight: 700; color: var(--note); }
+.notes-count { margin-left: 3px; font-size: 10px; font-weight: 600; color: rgba(255, 255, 255, 0.75); }
+.notes-count:empty { display: none; }
+.notes-btn.pulse { animation: note-pulse 0.6s ease-out; }
+@keyframes note-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(185, 168, 255, 0.75); }
+  100% { box-shadow: 0 0 0 8px rgba(185, 168, 255, 0); }
+}
+
+/* ---------- The Notes screen ---------- */
+.notes-head { margin-bottom: 6px; }
+.notes-head input {
+  width: 100%; padding: 6px 9px; border-radius: 7px; outline: none;
+  border: 1px solid rgba(255, 255, 255, 0.15); background: rgba(255, 255, 255, 0.06);
+  color: #fff; font-size: 12px;
+}
+.notes-head input:focus { border-color: var(--note); }
+.notes-head input::placeholder { color: rgba(255, 255, 255, 0.4); }
+.notes-btn.on { background: rgba(255, 255, 255, 0.14); }
+
+/* A note's second line: a preview of its body, and when it was last edited. */
+.note-meta {
+  flex: 0 0 100%; display: flex; justify-content: space-between; gap: 8px;
+  padding: 0 0 1px 18px; font-size: 10px; color: rgba(255, 255, 255, 0.45);
+}
+.note-snippet { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.note-when { flex: none; }
+.note-when:only-child { margin-left: auto; }
+.task-row .task-act.unfile:hover { background: var(--note); color: #1a1530; }
+
+.notes-empty { padding: 14px 6px; font-size: 11px; line-height: 1.5; opacity: 0.55; }
+
+/* ---------- Links in titles and notes ---------- */
+.link {
+  color: #8ab4ff; cursor: pointer; text-decoration: underline;
+  text-decoration-color: rgba(138, 180, 255, 0.4); text-underline-offset: 2px;
+}
+.link:hover, .link:focus-visible { text-decoration-color: currentColor; outline: none; }
+
+/* A link that stands for a page: its title, and the site it is on beside it in a muted colour. */
+.link-domain { margin-left: 6px; font-size: 10px; color: rgba(255, 255, 255, 0.45); }
+
+/* ---------- The notice bar (a restored backup, a failed save) ---------- */
+.notice {
+  display: flex; align-items: flex-start; gap: 8px; margin: 0 0 8px; padding: 6px 8px;
+  border-radius: 7px; font-size: 11px; line-height: 1.4; color: #f3dfa2;
+  background: rgba(224, 178, 62, 0.14); border: 1px solid rgba(224, 178, 62, 0.4);
+}
+.notice[hidden] { display: none; }
+.notice-text { flex: 1; min-width: 0; }
+.notice-close {
+  flex: none; width: 16px; height: 16px; padding: 0; border: none; border-radius: 4px;
+  background: transparent; color: inherit; font-size: 14px; line-height: 16px; cursor: pointer; opacity: 0.7;
+}
+.notice-close:hover { opacity: 1; background: rgba(255, 255, 255, 0.1); }
+
+/* ---------- Renaming a title (double-click) ---------- */
+.task-text .title-edit {
+  display: block; width: 100%; padding: 1px 4px; border-radius: 4px; outline: none;
+  border: 1px solid var(--note); background: rgba(255, 255, 255, 0.08);
+  color: #fff; font: inherit;
+}

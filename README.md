@@ -45,7 +45,14 @@ npm start
 
 ## Use it
 - Type a task in the box at the bottom, hit Enter. It appears as a row
-  above the box, untagged, with four small Q1–Q4 dots.
+  above the box, untagged, with four small Q1–Q4 dots and a violet **N**.
+  Several lines (Shift+Enter, or pasted): the first line is the title and the
+  rest become the row's notes.
+- **⌘↵ instead of Enter** saves it as a note, not a task: it never shows up in
+  the list, and the header's **N** counts it (it pulses when the count goes up).
+- **N beside Q1–Q4** does the same for something already in the dump: it isn't
+  a task, so it leaves the list and stops counting toward "Done x/y". Only
+  items still in the dump can be filed; recall an axis thread first.
 - **Tap a dot** to tag it. Tagging never moves it by itself — it only sets
   order (the paper's point). Tap the coloured chip any time, on a dump or
   an axis row, to retag.
@@ -66,6 +73,41 @@ npm start
   point back.
 - **Right-click a row → Delete** removes a task for good. Bars have no
   right-click.
+- **The header's N** opens your notes: a search box (every word has to match,
+  in the title or the notes), the most recently edited first, each with a
+  preview of its notes and when you last edited it. Click a note's title (or its
+  ▸) to read or edit it. **↩** sends a note back to the task dump as an untagged
+  task; right-click → Delete removes it. The box at the bottom takes a new note
+  (Enter saves it). Esc, or the N again, returns to the main screen.
+- **Links** (`http://`, `https://` or `www.`) in a title or in a row's notes are
+  clickable and open in your default browser (Enter on a focused link works
+  too). Only web addresses count: `javascript:`, `file:`, `mailto:` and bare
+  domains stay plain text, on purpose.
+- **A link on its own** (dumped with Enter or saved with ⌘↵) is looked up: once
+  the page's title arrives the row reads as that title with the site beside it
+  in grey. Until then, and for sites that hide their title from anything but a
+  browser (Instagram often does), it reads as the address tidied up
+  (`instagram.com/reel/abc…`, no `https://www.`). Hover the row for the whole
+  address; click the link to open it. The axis labels and the blob's tooltip use
+  the same name. It never blocks you: no title is not an error.
+- **Double-click a title** to rename it: Enter or clicking away saves, Esc leaves
+  it as it was. It works on tasks and notes (not on a task that is crossed off).
+  A link reads as its page title, but what you edit is the address; rename
+  something into a link and its page title is looked up, rename a link into words
+  and the old page title goes.
+- **▸ on any row** opens its notes: room for more than a title. A row with no
+  notes opens a text box with the cursor in it; otherwise you see the text as
+  written, and clicking it edits. It saves as you type (a moment after you
+  pause), when you click away, and on ⌘↵ or Esc. Esc keeps what you typed, it
+  never throws it away. The ▸ is violet when a row has notes. The panel won't
+  fold away while you're in the middle of typing; it folds when you stop, if
+  the mouse is still away.
+- **A yellow bar across the top of the panel** appears when something needs
+  your attention and you can't fix it from where you are: Blob restored its
+  last backup at startup because the saved file was damaged (the damaged file is
+  kept next to it), or a change couldn't be saved (disk full, folder locked; the
+  change stays on screen, and the bar goes away by itself when a save works
+  again). × dismisses it.
 - **Scoreboard** at the bottom: "Done 2/10" is tasks closed out of tasks
   ever listed, plus how many are active. Lifetime counters stored in
   `threads.json` under `stats`; deleting a task does not shrink them. The
@@ -84,10 +126,11 @@ step: `index.html` loads one entry point, `src/ui/app.js`.
 
 | Where | Role | May import |
 |---|---|---|
-| `src/core/` | Pure logic. `itemStore.js`: the item state machine — tasks (`addTask`, `tagTask`, `dispatchToAxis`, `recallToDump`, `resolveThread`, `reopenTask`) and notes (`addNote`, `fileAsNote`, `unfileNote`, `setBody`, `setText`, `setLinkTitle`), plus `deleteItem` and `toggleFocus` for either. `selectors.js`, `capture.js`, `linkify.js`, `migrate.js` (schema v2). No DOM, no Electron, no I/O: persistence and the change callback are injected. It runs in plain Node, which is where it is tested, and a phone app could reuse it unchanged. The UI doesn't call the note operations yet — that's the next phase. | only other `src/core/` files |
-| `src/ui/views/` | One file per thing on screen: `orbView`, `axisView`, `inboxView`, `scoreView`, `doneView`, plus `itemRow` (one row). A view is `createXView(elements, actions)` returning `{ render(snapshot, ui), applyHover?(id) }`. It draws from a **frozen snapshot** and reports what the user did through `actions`. It can't reach the store or the bridge. | `ui/dom`, `ui/theme`, `ui/format`, `core/selectors` |
-| `src/ui/` | The page's machinery, one job per file: `bridge` (the only file that reads `window.threadAxis`), `snapshot`, `hover`, `panel` (fold-out animation + window sizing), `screens`, `tooltip`, `rowMenu`, `dom`, `format`, `theme`. | each other, sparingly |
+| `src/core/` | Pure logic. `itemStore.js`: the item state machine — tasks (`addTask`, `tagTask`, `dispatchToAxis`, `recallToDump`, `resolveThread`, `reopenTask`) and notes (`addNote`, `fileAsNote`, `unfileNote`, `setBody`, `setText`, `setLinkTitle`), plus `deleteItem` and `toggleFocus` for either. `selectors.js` (including `displayTitle`: how an item's title reads, e.g. a link as its page title), `capture.js`, `linkify.js`, `migrate.js` (schema v2). No DOM, no Electron, no I/O: persistence and the change callback are injected. It runs in plain Node, which is where it is tested, and a phone app could reuse it unchanged. The UI calls `setBody` (the notes editor), `addNote` (⌘↵, the Notes screen's box), `fileAsNote` (the N dot) and `unfileNote` (↩); links (`setLinkTitle`, `setText`) arrive with the rest of Phase 4. | only other `src/core/` files |
+| `src/ui/views/` | One file per thing on screen: `orbView`, `axisView`, `inboxView`, `scoreView`, `doneView`, plus `itemRow` (one row), `bodyEditor` (an item's notes: read text ↔ textarea), `titleEditor` (renaming a title), `notesView` (the Notes screen) and `notesBadgeView` (the header's N and its count). A view is `createXView(elements, actions)` returning `{ render(snapshot, ui), applyHover?(id) }`. It draws from a **frozen snapshot** and reports what the user did through `actions`. It can't reach the store or the bridge. | `ui/dom`, `ui/theme`, `ui/format`, `views/itemRow`, `views/bodyEditor`, `views/titleEditor`, `core/selectors`, `core/linkify` |
+| `src/ui/` | The page's machinery, one job per file: `bridge` (the only file that reads `window.threadAxis`), `snapshot`, `hover`, `panel` (fold-out animation + window sizing), `renderGate` (holds a redraw while the user is mid-gesture), `pressGuard` (a press on a button doesn't pull focus out of an open editor), `captureBox` (what a key in the capture box means: Enter, ⌘↵, several lines, input methods; a pure function, unit-tested), `linkTitles` (asks for a captured link's page title, fire and forget, unit-tested with fakes), `screens` (main / Notes / ⚙), `notice` (the notice bar), `tooltip`, `rowMenu`, `dom`, `format`, `theme`. | each other, sparingly |
 | `src/ui/app.js` | The composition root. Looks up the page's elements (the only file that knows the ids in `index.html`), creates the store and the views, and hands each only the elements and actions it needs. | everything in `src/` |
+| `style.css`, `styles/` | Styling. `style.css` is the original; each new feature adds a file under `styles/` (loaded after it by `index.html`) instead of growing it. | – |
 | `preload.js` | The only bridge between the page and Electron (IPC): `window.threadAxis`. | Electron |
 | `main.js` | The composition root of the main process: builds each part below, hands it what it needs, registers IPC, listens for the app-level events (single-instance lock, quit, activate). No logic of its own. | Electron, `main/` |
 | `main/window.js` | The overlay window and everything that keeps it alive: closing hides (only a real quit lets it close), a missing window is rebuilt on demand, a dead renderer is reloaded (capped at 3/minute), and the navigation lockdown (`setWindowOpenHandler` denies, `will-navigate` is prevented — the page can never open or become another page). | Electron |
@@ -106,12 +149,25 @@ Rules that keep it rebuildable:
   strict, so a stray write throws instead of silently corrupting data. UI-only
   state (which row is being retagged, what is hovered) lives in the UI and is
   never written onto the data.
+- **The page is never redrawn under the user's hands.** Every change redraws
+  everything from the snapshot, so a change landing mid-gesture would destroy a
+  note being typed or, between mouse-down and mouse-up, swallow a click.
+  `ui/renderGate.js` holds the redraw while the pointer is down or a notes
+  editor has focus, and draws once when the gesture ends; `ui/pressGuard.js`
+  keeps a press on a button from pulling focus out of an open editor (the
+  editor would shrink under the pointer and the click would land on nothing).
+  A new view that keeps transient state adds itself to what `app.js` calls
+  "held"; it does not work around this itself.
 - **One door for each outside thing.** `window.threadAxis` only in
   `ui/bridge.js`; the ids of `index.html` only in `ui/app.js`. Hover sync works
   by each view repainting its own elements (`applyHover`), never by one view
   reaching into another's DOM.
 - **Nothing parses markup:** `innerHTML` is only ever assigned `''` (to clear).
-  Text goes through `textContent`, SVG through `svgEl`.
+  Text goes through `textContent`, SVG through `svgEl`, and text that may hold
+  links goes through `core/linkify` then `renderSegments` (nodes, one at a time).
+  A link is not a real `<a href>`: the page must never be able to navigate, so
+  the click goes to the main process, which checks the address again (web
+  addresses only) before opening it.
 - **A bar outlives the snapshot it was drawn from,** so click handlers on
   long-lived elements look the item up in the *latest* snapshot rather than
   trusting the one they were created with.
@@ -136,7 +192,8 @@ in-memory persistence object (every transition and its no-op cases; the 700 ms
 close animation runs on mock timers), the pure logic in `src/core/` (selectors,
 capture, link detection, data migration), the main-process helpers in `main/`
 (safe saving with backups, link fetching), and the small UI helpers that need no
-DOM (snapshot freezing, hover, timestamp formatting). Change a transition,
+DOM (snapshot freezing, hover, timestamp formatting, the redraw gate, the
+capture box's key rules). Change a transition,
 change its test.
 
 ```
@@ -152,6 +209,28 @@ check has to change for a refactor to pass, the refactor changed behaviour.
 Same requirements as `test:app` below.
 
 ```
+npm run test:notes
+```
+The same kind of test for the notes UI (the ▸ expander and body editor, the N
+dot, ⌘↵ and multi-line capture, the Notes screen: search, editing, back to
+the dump, delete, the new-note box, links, renaming, and the notice bar). It stubs `shell.openExternal` and
+`net.fetch`, so no test opens your real browser or reaches the network, and it
+proves both stubs work before it clicks a link. It starts from a crashed-mid-save
+file (garbage live file, good backup) to check the recovery notice, and makes the
+data folder read-only to check the failed-save notice. It is a separate file
+on purpose: `test:ui` pins today's behaviour and stays unchanged, this one grows
+with the feature. It covers typing, autosave, ⌘↵ and Esc, the redraw being held
+while you type, the panel not folding mid-sentence, hiding the window while
+typing, and a real (trusted) mouse press on a button while an editor is open.
+Its window is sealed off from you: it can't take keyboard focus, it ignores
+your real mouse, and the events the page reacts to (show, hide, the pointer
+entering or leaving) are sent by the test itself: macOS reports a window as
+"hidden" when something merely covers it, and real mouseenter/mouseleave events
+still reach a window that is meant to ignore the mouse (the test counts and
+ignores them). Both made timing checks fail at random. Input the test injects goes
+straight to the page, so it is unaffected. Don't loop it: one run per change.
+
+```
 npm run test:app
 ```
 The Electron-level check for `main.js`. It boots the real main process, then
@@ -164,8 +243,8 @@ Electron tests use fixture data and their own profile (see
 run while Blob is open.
 
 ```
-npm run verify            # everything: unit + test:app + test:ui
-npm run verify:packaged   # test:app + test:ui against the code inside the BUILT app.asar
+npm run verify            # everything: unit + test:app + test:ui + test:notes
+npm run verify:packaged   # the three Electron tests against the code inside the BUILT app.asar
 ```
 `verify:packaged` (after `npm run build`) is what catches a file missing from
 the package while `npm start` still works: run it before every install.

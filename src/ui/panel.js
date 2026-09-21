@@ -4,14 +4,23 @@
 //
 // What else has to happen when the panel collapses (hide the tooltip, drop the hover, blur the input,
 // go back to the main screen) is the caller's business: it passes onCollapse.
+//
+// The panel never folds away mid-sentence: while the user is typing (the caller says when: isTyping),
+// moving the mouse out only postpones the fold. It happens the moment they stop (if the mouse is still
+// away), so a note being typed is never cut off, and the panel is not left stuck open either. What
+// counts as typing is the caller's call too: a box that merely has focus, with nothing typed in it,
+// has nothing to lose and must not pin the panel open. The caller also says when typing may have
+// stopped, by calling settle(): the panel does not try to work that out from focus events, which are
+// not reliable when an editor swaps its textarea out mid-blur.
 const LEAVE_GRACE_MS = 300;
 const COLLAPSE_MS = 240;
 
-export function createPanel({ shell, panel, windowCtl, onCollapse }) {
+export function createPanel({ shell, panel, windowCtl, onCollapse, isTyping = () => false }) {
   let expanded = false;
   let animating = false;
   let leaveTimer = null;
   let collapseTimer = null;
+  let leftWhileTyping = false; // the mouse left mid-sentence: the fold is owed, not forgotten
 
   // Ask main to make the window exactly the size of the shell.
   function sendShellSize() {
@@ -52,6 +61,7 @@ export function createPanel({ shell, panel, windowCtl, onCollapse }) {
   function close({ immediate = false } = {}) {
     clearTimeout(leaveTimer);
     clearTimeout(collapseTimer);
+    leftWhileTyping = false;
     if (!expanded) return;
     expanded = false;
     onCollapse();
@@ -80,13 +90,27 @@ export function createPanel({ shell, panel, windowCtl, onCollapse }) {
 
   function scheduleClose() {
     clearTimeout(leaveTimer);
-    leaveTimer = setTimeout(() => close(), LEAVE_GRACE_MS);
+    leaveTimer = setTimeout(() => {
+      if (isTyping()) { leftWhileTyping = true; return; } // finish the sentence first
+      close();
+    }, LEAVE_GRACE_MS);
   }
 
   // Hover anywhere on the shell (orbs or the open panel) keeps it open; leaving starts the grace
   // timer so going from the orbs to the panel doesn't collapse it.
-  shell.addEventListener('mouseenter', open);
+  shell.addEventListener('mouseenter', () => {
+    leftWhileTyping = false; // the mouse is back: nothing is owed
+    open();
+  });
   shell.addEventListener('mouseleave', scheduleClose);
 
-  return { open, close, syncSize };
+  // The user may have stopped typing: if a fold was postponed and nothing is being typed any more, it
+  // falls due now.
+  function settle() {
+    if (!leftWhileTyping || isTyping()) return;
+    leftWhileTyping = false;
+    scheduleClose();
+  }
+
+  return { open, close, syncSize, settle };
 }

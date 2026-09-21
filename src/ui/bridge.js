@@ -7,6 +7,8 @@ export function createBridge(api = window.threadAxis) {
     persistence: {
       loadThreads: () => api.loadThreads(),
       saveThreads: (data) => api.saveThreads(data),
+      // null, or { kind: 'recovered-from-backup', at } when the load had to fall back to the backup.
+      getLoadNotice: () => api.getLoadNotice(),
     },
     // Asking the window to change: the renderer measures itself and asks for that size.
     windowCtl: {
@@ -17,6 +19,12 @@ export function createBridge(api = window.threadAxis) {
     settings: {
       getLoginItem: () => api.getLoginItem(),
       setLoginItem: (on) => api.setLoginItem(on),
+    },
+    // Links: open one in the browser, and fetch the title of a page. Main checks every address again (http and
+    // https only) whatever the page already checked.
+    links: {
+      openExternal: (url) => api.openExternal(url),
+      fetchTitle: (url) => api.fetchTitle(url),
     },
     // The window telling us it was revealed (hotkey, tray, Dock) or hidden.
     lifecycle: {
