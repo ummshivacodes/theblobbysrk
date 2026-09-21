@@ -334,7 +334,13 @@ Kept current so a new session (or a different model) can pick up exactly where t
   store tests (lane E), the architecture test (lane D), `verify:packaged`.
 - **Lane C merged** (pure core: `history`, `migrate`, `capture`, `linkify`, `selectors`; 245 tests).
 - **Lane B1 merged** (`main/persistence.js`, `links.js`, `lib/safeUrl.js`, `lib/titleFromHtml.js`; 121 tests).
-- **Lane B2 running** (Phase 2: split `main.js`, wire B1 in, navigation lockdown, additive preload API).
+- **Lane B2 merged**: `main.js` is now an 83-line composition root; `main/window.js` (navigation lockdown added: `setWindowOpenHandler` denies, `will-navigate` prevented — the page can never leave `index.html`), `main/tray.js`, `main/ipc.js` (the only file calling `ipcMain.*`), `main/settings.js`. `preload.js` gained `openExternal`/`fetchTitle`/`getLoadNotice`, additive only. Verified independently before merging: ownership, 208 unit tests, both Electron gates, every file read in full, channel names cross-checked by hand.
+- **Lane D merged**: the architecture test (12 rules, `test/unit/lib/architecture.mjs` + `.test.mjs`), written from the plan without reading the code it checks. Its tokenizer was cross-validated against Node's bundled `acorn` over 3,495 real files before being trusted.
+- **Phases 0–2 complete and merged. `PHASE = { renderer: true, main: true }`** — the architecture test now actually runs its renderer- and main-gated rules against the real tree, not just the meta-tests. It found one real thing: `main/links.js` had a local variable named `window` (its lookback buffer for a `</head>` scan) — not a DOM leak, but a name that invites the question; renamed to `scanBuf`. 660 unit tests, both Electron gates, and `verify:packaged` (the packed `.asar`) all green.
+- **Phase 3 (notes in the store) already complete** (see above) — done ahead of the original sequencing since it doesn't depend on lane B.
+- **Lane F running**: independent spec-based tests for the note store, written from the plan alone before reading `itemStore.js`, as a second pair of eyes on Phase 3.
+
+**Checkpoint reached: Phases 0–2 (and 3) are merged, green, including the packaged build. Nothing user-visible has changed — Phase 4 (the notes UI) is next and is the first phase that does.**
 
 **How the finished pure modules are meant to be used (from the lane reports)**
 - `migrate(saved)` returns a fresh object sharing no memory with its input; `null`/garbage gives the empty state,

@@ -84,12 +84,18 @@ step: `index.html` loads one entry point, `src/ui/app.js`.
 
 | Where | Role | May import |
 |---|---|---|
-| `src/core/` | Pure logic. Today: the item state machine (`itemStore.js`: `addTask`, `tagTask`, `dispatchToAxis`, `recallToDump`, `resolveThread`, `reopenTask`, `deleteTask`, `toggleFocus`). No DOM, no Electron, no I/O: persistence and the change callback are injected. It runs in plain Node, which is where it is tested, and a phone app could reuse it unchanged. | only other `src/core/` files |
+| `src/core/` | Pure logic. `itemStore.js`: the item state machine — tasks (`addTask`, `tagTask`, `dispatchToAxis`, `recallToDump`, `resolveThread`, `reopenTask`) and notes (`addNote`, `fileAsNote`, `unfileNote`, `setBody`, `setText`, `setLinkTitle`), plus `deleteItem` and `toggleFocus` for either. `selectors.js`, `capture.js`, `linkify.js`, `migrate.js` (schema v2). No DOM, no Electron, no I/O: persistence and the change callback are injected. It runs in plain Node, which is where it is tested, and a phone app could reuse it unchanged. The UI doesn't call the note operations yet — that's the next phase. | only other `src/core/` files |
 | `src/ui/views/` | One file per thing on screen: `orbView`, `axisView`, `inboxView`, `scoreView`, `doneView`, plus `itemRow` (one row). A view is `createXView(elements, actions)` returning `{ render(snapshot, ui), applyHover?(id) }`. It draws from a **frozen snapshot** and reports what the user did through `actions`. It can't reach the store or the bridge. | `ui/dom`, `ui/theme`, `ui/format`, `core/selectors` |
 | `src/ui/` | The page's machinery, one job per file: `bridge` (the only file that reads `window.threadAxis`), `snapshot`, `hover`, `panel` (fold-out animation + window sizing), `screens`, `tooltip`, `rowMenu`, `dom`, `format`, `theme`. | each other, sparingly |
 | `src/ui/app.js` | The composition root. Looks up the page's elements (the only file that knows the ids in `index.html`), creates the store and the views, and hands each only the elements and actions it needs. | everything in `src/` |
-| `preload.js` | The only bridge between the page and Electron (IPC). | Electron |
-| `main.js` | The OS shell: window, tray, hotkey, reading/writing `threads.json`. | Electron, Node |
+| `preload.js` | The only bridge between the page and Electron (IPC): `window.threadAxis`. | Electron |
+| `main.js` | The composition root of the main process: builds each part below, hands it what it needs, registers IPC, listens for the app-level events (single-instance lock, quit, activate). No logic of its own. | Electron, `main/` |
+| `main/window.js` | The overlay window and everything that keeps it alive: closing hides (only a real quit lets it close), a missing window is rebuilt on demand, a dead renderer is reloaded (capped at 3/minute), and the navigation lockdown (`setWindowOpenHandler` denies, `will-navigate` is prevented — the page can never open or become another page). | Electron |
+| `main/tray.js` | The menu-bar icon and its menu. | Electron |
+| `main/ipc.js` | The only file that registers an IPC channel (`ipcMain.*`) — literal calls, so the channel names can be read straight off the file and checked against `preload.js`. | Electron, the parts above |
+| `main/persistence.js` | `threads.json`: atomic write, daily backups, quarantines a file it can't read (or that parses but isn't a valid state) rather than ever overwriting it. | Node only — no Electron |
+| `main/links.js`, `main/lib/*` | Opening a link (re-validates the URL; the main process never trusts the page) and fetching a page's title for a captured bare URL. | Node only — no Electron |
+| `main/settings.js` | The one real setting: launch at login. | Electron |
 
 Rules that keep it rebuildable:
 - **Transitions live in `src/core/itemStore.js` only.** It guards each one, so
@@ -112,12 +118,13 @@ Rules that keep it rebuildable:
 - **New source files must be covered by `build.files` in `package.json`**
   (`src/**` and `main/**` already are). Otherwise the packaged app ships
   without them while `npm start` keeps working, which is a nasty one to find.
-- **`main.js` never trusts its window.** Every call goes through
+- **`main/window.js` never trusts its window.** Every call goes through
   `liveWindow()` (a destroyed window throws on every method), closing hides
   (⌘W is in Electron's default menu), only a real quit lets it close, and a
   dead renderer is reloaded (at most 3 a minute). Before this, one stray ⌘W
   left Blob running with no window, and the hotkey, tray and Dock all threw
-  "Object has been destroyed".
+  "Object has been destroyed". It also locks the page down so it can never
+  navigate away or open another window — see the table above.
 
 ## Tests
 ```
