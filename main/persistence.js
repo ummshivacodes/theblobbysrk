@@ -6,7 +6,10 @@
 // overwrote what was left. Here a save goes to a .tmp file and is renamed over
 // the real one (the real file is always the old version or the new one), a good
 // copy is kept before each run's first save and once a day, and a file we
-// cannot read is set aside, never overwritten and never deleted.
+// cannot read is set aside, never overwritten and never deleted. "Cannot read"
+// includes a file that parses but is not a state the app understands (see
+// `validate`): the app would ignore it, start empty, and the next save would
+// destroy it.
 //
 // Files, for filePath = /x/threads.json:
 //   /x/threads.json.tmp                  transient write target
@@ -25,7 +28,10 @@ function localDay(ms) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-function createPersistence({ filePath, now = Date.now, fs = require('node:fs') } = {}) {
+// validate(data) -> boolean says whether parsed JSON is a state worth loading. It only ever
+// sees a non-null object, so it can be as short as (d) => Array.isArray(d.threads). Without
+// one, any object will do.
+function createPersistence({ filePath, now = Date.now, fs = require('node:fs'), validate = () => true } = {}) {
   if (typeof filePath !== 'string' || filePath === '') {
     throw new TypeError('createPersistence: filePath is required');
   }
@@ -43,9 +49,20 @@ function createPersistence({ filePath, now = Date.now, fs = require('node:fs') }
   // the same check.
   let lastBackupDay = null;
 
+  // Parsed JSON the app can use: an object that also passes validate. A validate
+  // that throws counts as a no.
+  function isUsable(data) {
+    if (typeof data !== 'object' || data === null) return false;
+    try {
+      return Boolean(validate(data));
+    } catch {
+      return false;
+    }
+  }
+
   // { status: 'missing' } | { status: 'bad' } | { status: 'ok', text, data }.
   // 'bad' is anything the app could not use: unreadable, not JSON, or JSON that
-  // is not an object.
+  // is not a usable state.
   function inspect(file) {
     let text;
     try {
@@ -55,7 +72,7 @@ function createPersistence({ filePath, now = Date.now, fs = require('node:fs') }
     }
     try {
       const data = JSON.parse(text);
-      if (typeof data === 'object' && data !== null) return { status: 'ok', text, data };
+      if (isUsable(data)) return { status: 'ok', text, data };
     } catch {
       // not JSON: falls through to 'bad'
     }
@@ -158,8 +175,8 @@ function createPersistence({ filePath, now = Date.now, fs = require('node:fs') }
   // Throws (leaving disk untouched) if data can't be serialised; otherwise
   // returns true, or rethrows after cleaning up its .tmp if the write failed.
   function save(data) {
-    // Only an object is ever loadable again; anything else would be set aside as corrupt.
-    if (typeof data !== 'object' || data === null) throw new TypeError('save: data must be an object');
+    // Only what load() would accept is ever written; anything else would come back as corrupt.
+    if (!isUsable(data)) throw new TypeError('save: data is not a valid state');
     // First, so a circular or BigInt value fails before anything on disk changes.
     const json = JSON.stringify(data, null, 2);
     if (typeof json !== 'string') throw new TypeError('save: data is not serialisable');

@@ -10,4 +10,9 @@ contextBridge.exposeInMainWorld('threadAxis', {
   setLoginItem: (on) => ipcRenderer.invoke('set-login-item', on),
   onShown: (cb) => ipcRenderer.on('window-shown', () => cb()),
   onHidden: (cb) => ipcRenderer.on('window-hidden', () => cb()),
+  // Links. Main re-validates every URL (http/https only), whatever the page checked.
+  openExternal: (url) => ipcRenderer.invoke('open-external', url),
+  fetchTitle: (url) => ipcRenderer.invoke('fetch-title', url),
+  // null, or { kind: 'recovered-from-backup', at } when the load had to use the backup.
+  getLoadNotice: () => ipcRenderer.invoke('get-load-notice'),
 });
