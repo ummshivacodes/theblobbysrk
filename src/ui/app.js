@@ -105,7 +105,11 @@ function render() {
   panel.syncSize();
 }
 
-store = createItemStore(bridge.persistence, render);
+// A save that fails (disk full, permissions) must not be silent. For now it is logged; the Notes work
+// shows it to the user in a notice bar, which is where getLoadNotice's recovery message will go too.
+store = createItemStore(bridge.persistence, render, {
+  onSaveError: (err) => console.error('[blob] could not save:', err),
+});
 
 // ---- wiring --------------------------------------------------------------------------------
 input.addEventListener('keydown', (e) => {

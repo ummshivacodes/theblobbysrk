@@ -746,3 +746,125 @@ describe('the life of a task', () => {
     assert.deepEqual(restarted.store.state, store.state);
   });
 });
+
+// A tag is one of Q1..Q4. "No tag" (null) is not something you can tag a thread with: an axis thread
+// must always have one, and dispatchToAxis relies on it. (Found by lane G's independent tests.)
+describe('tagTask only accepts a real tag', () => {
+  const NOT_TAGS = [0, 5, 9, -1, 2.5, NaN, '2', null, undefined, true, {}, [2]];
+
+  for (const status of ['dump', 'axis']) {
+    for (const bad of NOT_TAGS) {
+      it(`ignores ${JSON.stringify(bad) ?? String(bad)} on ${a(status)} thread: nothing changes, nothing is saved`, async () => {
+        const ctx = await openStore([thread('t1', status, { quad: 2 })]);
+        assertNoOp(ctx, () => ctx.store.tagTask('t1', bad));
+        assert.equal(byId(ctx.store, 't1').quad, 2, 'the thread keeps the tag it had');
+      });
+    }
+  }
+
+  for (const q of [1, 2, 3, 4]) {
+    it(`accepts Q${q}`, async () => {
+      const { store } = await openStore([thread('t1', 'dump', { quad: null })]);
+      store.tagTask('t1', q);
+      assert.equal(byId(store, 't1').quad, q);
+    });
+  }
+});
+
+// The store keeps its state in memory and saves the WHOLE state on every change, so a failed save is
+// retried by the next change. What it must never do is fail silently: the user would think a note was
+// kept when it was not. (Found by lane G: the returned promise used to be dropped.)
+describe('a failed save', () => {
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+  // A store whose saveThreads behaves as `mode` says, one call at a time.
+  function storeThatSaves(modes, options) {
+    const errors = [];
+    const changes = { count: 0 };
+    let call = 0;
+    const persistence = {
+      loadThreads: async () => null,
+      saveThreads: (data) => {
+        const mode = modes[Math.min(call++, modes.length - 1)];
+        if (mode === 'throws') throw new Error('sync failure');
+        if (mode === 'rejects') return Promise.reject(new Error('disk full'));
+        return Promise.resolve(true);
+      },
+    };
+    const store = createItemStore(persistence, () => { changes.count += 1; },
+      options === undefined ? { onSaveError: (err) => errors.push(err.message) } : options);
+    return { store, errors, changes };
+  }
+
+  it('tells onSaveError, with the error, when the save is rejected', async () => {
+    const { store, errors } = storeThatSaves(['rejects']);
+    store.addTask('keep me');
+    await settle();
+    assert.deepEqual(errors, ['disk full']);
+  });
+
+  it('tells onSaveError when saveThreads throws instead of returning a promise', async () => {
+    const { store, errors } = storeThatSaves(['throws']);
+    store.addTask('keep me');
+    await settle();
+    assert.deepEqual(errors, ['sync failure']);
+  });
+
+  it('reports every failed save, not just the first', async () => {
+    const { store, errors } = storeThatSaves(['rejects']);
+    store.addTask('one');
+    store.addTask('two');
+    await settle();
+    assert.deepEqual(errors, ['disk full', 'disk full']);
+  });
+
+  it('keeps the change in memory and still tells the UI when the save fails', async () => {
+    const { store, changes } = storeThatSaves(['rejects']);
+    const id = store.addTask('keep me');
+    await settle();
+    assert.equal(byId(store, id).text, 'keep me');
+    assert.equal(changes.count, 1);
+  });
+
+  it('a failure is not sticky: the next change saves the whole state, earlier change included', async () => {
+    const saved = [];
+    let fail = true;
+    const persistence = {
+      loadThreads: async () => null,
+      saveThreads: (data) => {
+        if (fail) return Promise.reject(new Error('disk full'));
+        saved.push(structuredClone(data));
+        return Promise.resolve(true);
+      },
+    };
+    const store = createItemStore(persistence, () => {}, { onSaveError: () => {} });
+    store.addTask('first, lost to the failure');
+    await settle();
+    fail = false;
+    store.addTask('second');
+    await settle();
+    assert.deepEqual(saved.at(-1).threads.map((t) => t.text), ['first, lost to the failure', 'second']);
+  });
+
+  it('a successful save reports nothing', async () => {
+    const { store, errors } = storeThatSaves(['ok']);
+    store.addTask('fine');
+    await settle();
+    assert.deepEqual(errors, []);
+  });
+
+  it('with no onSaveError given, a rejected save is not an unhandled rejection', async () => {
+    const { store } = storeThatSaves(['rejects'], {});
+    const seen = [];
+    const listener = (reason) => seen.push(reason);
+    process.on('unhandledRejection', listener);
+    try {
+      store.addTask('keep me');
+      await settle();
+      await settle();
+    } finally {
+      process.off('unhandledRejection', listener);
+    }
+    assert.deepEqual(seen, []);
+  });
+});

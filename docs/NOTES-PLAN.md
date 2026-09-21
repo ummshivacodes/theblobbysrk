@@ -182,6 +182,25 @@ Tightened while we're here (found by porting the store tests; each gets a test):
   forever. Reverting is safe and consistent: the score and history only change when the 700 ms finishes,
   so nothing had been counted.
 - New ids can't collide (a counter or random suffix on top of the timestamp).
+
+**The rest of the store's rules, written down** (they pre-date the notes work; lane G's independent tests found
+the plan never stated them, so the code was the only spec):
+- **`history`** holds one entry per task ever crossed off: exactly `{ id, text, quad, createdAt, doneAt }`
+  (`core/history.js`). It outlives the row: deleting a task never removes its entry; reopening removes it.
+- **Seeding an older (v1) file** on load, only for what the file lacks: `stats.listed` = every non-note thread,
+  `stats.done` = the done threads; `history` = one entry per done thread. A scoreboard with a missing or
+  invalid field is reseeded whole rather than trusted (it used to become `NaN`).
+- **Tags:** `tagTask` accepts only 1, 2, 3 or 4, and never on `resolving`/`done`/`note`. "No tag" is not a tag: an
+  axis thread must always have one, and `dispatchToAxis` needs one.
+- **`recallToDump`:** `axis` → `dump`, keeps the tag, drops `focused`. **`reopenTask`:** `done` → `axis` (where it was
+  when closed), drops `doneAt`, `stats.done` − 1 (floor 0), removes its history entry. **`toggleFocus`:** axis
+  threads only; one focus at a time; clearing removes the key (never `focused: false`).
+- **Closing:** `resolveThread` acts on `axis` only. A closing thread keeps `focused` until the 700 ms beat ends
+  (then it is dropped), so "only an axis thread may be focused" is really "an axis thread, or one mid-close".
+- **A failed save is never silent.** `createItemStore(persistence, onChange, { onSaveError })` reports a rejected or
+  throwing `saveThreads`; the change stays in memory and the next change saves the whole state again, so a failure
+  is retried for free. The UI shows it in the same notice bar as `getLoadNotice()`'s recovery message (Phase 4);
+  until then `app.js` logs it.
 "Done 11/20" stays a task ratio: notes never count as listed.
 
 ## 5. UI spec
@@ -352,7 +371,8 @@ Kept current so a new session (or a different model) can pick up exactly where t
 - **Phases 0–2 complete and merged. `PHASE = { renderer: true, main: true }`** — the architecture test now actually runs its renderer- and main-gated rules against the real tree, not just the meta-tests. It found one real thing: `main/links.js` had a local variable named `window` (its lookback buffer for a `</head>` scan) — not a DOM leak, but a name that invites the question; renamed to `scanBuf`. 660 unit tests, both Electron gates, and `verify:packaged` (the packed `.asar`) all green.
 - **Phase 3 (notes in the store) already complete** (see above) — done ahead of the original sequencing since it doesn't depend on lane B.
 - **Lane F merged** (its first attempt stalled before writing anything; retried as two smaller agents, F and G). F wrote 148 tests for the note operations from the spec before reading the code and found one real bug: `setBody` stored non-strings as text (`42` → `"42"`). Fixed, along with the same class of gap it found by probing: blank/non-string titles, un-normalised bodies on creation, a repeated link title re-saving, `unfileNote` keeping a stray tag. All pinned by 50 new tests, each mutation-checked (4 deliberate breaks, all caught). F also surfaced the `updatedAt` spec conflict, now resolved in section 4.
-- **Lane G running**: the integrity half (ids, delete, load/save round trip, a seeded-random invariant test).
+- **Lane G merged** (113 tests incl. a seeded-random test: 40 seeds × 60 operations, invariants checked after every one). It passed on first contact, 57 of 58 deliberate breakages caught (the survivor is the history entry shape, now specified). It surfaced three real gaps, all fixed and pinned: `tagTask` accepted any value including `null` (stripping the tag from an axis thread); **a failed save was silent** (the store dropped the promise; now `onSaveError`); and rules the plan never wrote down (above).
+- **Independent review round complete for Phases 0–3**: five agents (C, D, E, F, G) plus lane B wrote or checked code from the spec; between them they found and got fixed: a naming collision in `main/`, the non-string body bug, five hardening gaps, unvalidated tags and the silent save failure. the unit suite went from 462 to 1,006 tests.
 
 **Checkpoint reached: Phases 0–2 (and 3) are merged, green, including the packaged build. Nothing user-visible has changed — Phase 4 (the notes UI) is next and is the first phase that does.**
 

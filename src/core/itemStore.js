@@ -10,7 +10,9 @@
 // them, not just count them.
 //
 // persistence = { loadThreads, saveThreads }. onChange is invoked after every mutation; the app
-// passes its render function.
+// passes its render function. options.onSaveError(err) hears about a save that failed (disk full,
+// permissions): the state is kept in memory and every later mutation saves the whole state again, so
+// a failed save is retried by the next change, but it must never be silent.
 //
 // Every transition is guarded: an impossible move (closing a thread that is in the dump, filing a
 // task that is already on the axis) does nothing: no change, no save, no redraw. Input is normalised
@@ -19,6 +21,7 @@ import { toHistory } from './history.js';
 import { migrate } from './migrate.js';
 
 const CLOSE_BEAT_MS = 700; // how long a thread shows "crossed off" before it counts as done
+const QUADS = [1, 2, 3, 4];
 
 // The store owns the shape of its data, whoever is calling. A title is a trimmed string and never
 // blank; a body is a string with its trailing whitespace trimmed, and an empty body is simply no body.
@@ -26,15 +29,20 @@ const CLOSE_BEAT_MS = 700; // how long a thread shows "crossed off" before it co
 const cleanText = (text) => (typeof text === 'string' ? text.trim() : '');
 const cleanBody = (body) => (typeof body === 'string' ? body.replace(/\s+$/, '') : '');
 
-export function createItemStore(persistence, onChange) {
+export function createItemStore(persistence, onChange, { onSaveError = () => {} } = {}) {
   const state = { version: 2, threads: [], stats: { listed: 0, done: 0 }, history: [] };
   const closing = new Map(); // id → timer of a close in flight, so deleting the item can cancel it
 
   const find = (id) => state.threads.find((x) => x.id === id);
 
-  // Every persisted change saves, then redraws.
+  // Every persisted change saves, then redraws. A failed save is reported, never swallowed and never
+  // fatal: the change stays in memory and the next change saves everything again.
   function commit() {
-    persistence.saveThreads(state);
+    try {
+      Promise.resolve(persistence.saveThreads(state)).catch(onSaveError);
+    } catch (err) {
+      onSaveError(err);
+    }
     onChange();
   }
 
@@ -95,10 +103,12 @@ export function createItemStore(persistence, onChange) {
   // Tagging never moves a thread by itself: Q1..Q4 is only ever a label (the paper's point: the tag
   // sets *order*, not placement). Moving between the dump and the axis is always an explicit act:
   // dispatchToAxis / recallToDump below, wired to the row's →/← buttons. Retagging works the same
-  // way regardless of where the thread currently sits. Notes have no tag.
+  // way regardless of where the thread currently sits. Notes have no tag, and a tag is one of Q1..Q4:
+  // "no tag" is not something you can tag a thread with (an axis thread must always have one).
   function tagTask(id, quad) {
     const t = find(id);
     if (!t || t.status === 'resolving' || t.status === 'done' || t.status === 'note') return;
+    if (!QUADS.includes(quad)) return;
     t.quad = quad;
     commit();
   }
