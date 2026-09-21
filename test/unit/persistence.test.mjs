@@ -575,3 +575,113 @@ describe('never overwrite a file we could not read', () => {
     assert.equal(fs.existsSync(at('backups')), true);
   });
 });
+
+describe('validate: a file that parses but is not a state counts as unreadable', () => {
+  // What main.js passes: the renderer ignores a file without a threads array, starts empty, and the
+  // next save would silently overwrite it.
+  const hasThreads = (d) => Array.isArray(d.threads);
+  const persistenceFor = (file, extra = {}) => createPersistence({
+    filePath: file, now: () => 1750000000000, validate: hasThreads, ...extra,
+  });
+
+  test('a real state loads as usual', () => {
+    const { file } = sandbox();
+    fs.writeFileSync(file, pretty(sample(1)));
+    assert.deepEqual(persistenceFor(file).load(), { data: sample(1), recoveredFrom: null, quarantined: null });
+  });
+
+  test('JSON that is an object but not a state is set aside, bytes intact, like invalid JSON', () => {
+    for (const bytes of ['{"foo":1}', '{}', '{"threads": "nope"}', '{"threads": null}', '{"threads": {}}', '[]', '[1, 2]']) {
+      const { dir, file, at } = sandbox();
+      fs.writeFileSync(file, bytes);
+      const quarantined = at('threads.corrupt-1750000000000.json');
+      assert.deepEqual(persistenceFor(file).load(), { data: null, recoveredFrom: null, quarantined }, bytes);
+      assert.equal(read(quarantined), bytes);
+      assert.deepEqual(listing(dir), ['threads.corrupt-1750000000000.json']);
+    }
+  });
+
+  test('it falls back to a good backup, and the good copy becomes the live file again', () => {
+    const { file, at } = sandbox();
+    fs.writeFileSync(file, '{"foo":1}');
+    fs.writeFileSync(at('threads.backup.json'), pretty(sample(4)));
+    const quarantined = at('threads.corrupt-1750000000000.json');
+
+    assert.deepEqual(persistenceFor(file).load(), { data: sample(4), recoveredFrom: 'backup', quarantined });
+    assert.equal(read(quarantined), '{"foo":1}');
+    assert.equal(read(file), pretty(sample(4)));
+  });
+
+  test('a backup that is not a state is not used either, and is left alone', () => {
+    const { dir, file, at } = sandbox();
+    fs.writeFileSync(file, '{"oops');
+    fs.writeFileSync(at('threads.backup.json'), '{"foo":1}');
+    const quarantined = at('threads.corrupt-1750000000000.json');
+
+    assert.deepEqual(persistenceFor(file).load(), { data: null, recoveredFrom: null, quarantined });
+    assert.equal(read(at('threads.backup.json')), '{"foo":1}');
+    assert.deepEqual(listing(dir), ['threads.backup.json', 'threads.corrupt-1750000000000.json']);
+  });
+
+  test('saving over such a file sets it aside and never copies it over a good backup', () => {
+    const { dir, file, at } = sandbox();
+    fs.writeFileSync(file, '{"foo":1}');
+    fs.writeFileSync(at('threads.backup.json'), pretty(sample(1)));
+    const quarantined = at('threads.corrupt-1750000000000.json');
+
+    assert.equal(persistenceFor(file).save(sample(2)), true);
+    assert.equal(read(file), pretty(sample(2)));
+    assert.equal(read(quarantined), '{"foo":1}');
+    assert.equal(read(at('threads.backup.json')), pretty(sample(1)), 'the good backup is still the good one');
+    assert.deepEqual(listing(dir), ['threads.backup.json', 'threads.corrupt-1750000000000.json', 'threads.json'], 'no dated copy of it either');
+  });
+
+  test('a good live file is still backed up as before', () => {
+    const { file, at } = sandbox();
+    fs.writeFileSync(file, pretty(sample(1)));
+    persistenceFor(file, { now: () => TODAY }).save(sample(2));
+    assert.equal(read(at('threads.backup.json')), pretty(sample(1)));
+    assert.equal(read(at('backups', 'threads-2026-09-21.json')), pretty(sample(1)));
+  });
+
+  test('save refuses data that is not a state, and leaves the file alone', () => {
+    const { dir, file } = sandbox();
+    fs.writeFileSync(file, pretty(sample(1)));
+    const p = persistenceFor(file);
+    for (const bad of [{ foo: 1 }, {}, { threads: 'nope' }, { threads: null }]) {
+      assert.throws(() => p.save(bad), TypeError, JSON.stringify(bad));
+    }
+    assert.equal(read(file), pretty(sample(1)));
+    assert.deepEqual(listing(dir), ['threads.json']);
+    assert.equal(p.save(sample(3)), true, 'a real state still saves');
+  });
+
+  test('validate only ever sees objects, and one that throws counts as a no', () => {
+    const seen = [];
+    const spy = (d) => { seen.push(d); return true; };
+    for (const bytes of ['null', '42', '"text"', 'true']) {
+      const { file } = sandbox();
+      fs.writeFileSync(file, bytes);
+      persistenceFor(file, { validate: spy }).load();
+    }
+    assert.deepEqual(seen, [], 'never called with a non-object');
+
+    const { file, at } = sandbox();
+    fs.writeFileSync(file, pretty(sample(1)));
+    persistenceFor(file, { validate: spy }).load();
+    assert.deepEqual(seen, [sample(1)]);
+
+    const boom = () => { throw new Error('validator bug'); };
+    const throwing = persistenceFor(file, { validate: boom });
+    assert.deepEqual(throwing.load(), { data: null, recoveredFrom: null, quarantined: at('threads.corrupt-1750000000000.json') });
+    assert.throws(() => throwing.save(sample(2)), /not a valid state/);
+  });
+
+  test('without a validate, any object is a state, as before', () => {
+    const { file } = sandbox();
+    fs.writeFileSync(file, '{"foo":1}');
+    const p = createPersistence({ filePath: file, now: () => TODAY });
+    assert.deepEqual(p.load(), { data: { foo: 1 }, recoveredFrom: null, quarantined: null });
+    assert.equal(p.save({ anything: true }), true);
+  });
+});
