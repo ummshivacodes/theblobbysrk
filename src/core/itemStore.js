@@ -1,146 +1,238 @@
 // ---------- Item store ----------
-// The task state machine (dump → axis → resolving → done, plus focus and history). No DOM, no
-// Electron, no browser globals: it only ever touches the `persistence` and `onChange` it is handed,
-// so it runs in plain Node under test (and, later, in a phone app).
+// The item state machine: tasks (dump → axis → resolving → done, plus focus and history) and notes.
+// No DOM, no Electron, no browser globals: it only ever touches the `persistence` and `onChange` it is
+// handed, so it runs in plain Node under test (and, later, in a phone app).
+//
+// status is the one discriminator: 'dump' | 'axis' | 'resolving' | 'done' | 'note'. A note is never a
+// half-task: it has no quad, never goes on the axis, and never counts in "listed".
 //
 // history = every task ever crossed off (kept after the row is deleted), so the ⚙ screen can list
 // them, not just count them.
 //
 // persistence = { loadThreads, saveThreads }. onChange is invoked after every mutation; the app
 // passes its render function.
+//
+// Every transition is guarded: an impossible move (closing a thread that is in the dump, filing a
+// task that is already on the axis) does nothing: no change, no save, no redraw.
 import { toHistory } from './history.js';
+import { migrate } from './migrate.js';
+
+const CLOSE_BEAT_MS = 700; // how long a thread shows "crossed off" before it counts as done
 
 export function createItemStore(persistence, onChange) {
-  const state = { threads: [], stats: { listed: 0, done: 0 }, history: [] };
+  const state = { version: 2, threads: [], stats: { listed: 0, done: 0 }, history: [] };
+  const closing = new Map(); // id → timer of a close in flight, so deleting the item can cancel it
+
+  const find = (id) => state.threads.find((x) => x.id === id);
+
+  // Every persisted change saves, then redraws.
+  function commit() {
+    persistence.saveThreads(state);
+    onChange();
+  }
+
+  // Timestamp ids, made unique: two items created in the same millisecond must not share an id
+  // (find/delete/close would treat them as one).
+  function newId() {
+    const base = Date.now().toString(36);
+    let id = base;
+    for (let n = 1; state.threads.some((t) => t.id === id); n++) id = `${base}-${n.toString(36)}`;
+    return id;
+  }
 
   async function loadState() {
-    const saved = await persistence.loadThreads();
-    if (saved && Array.isArray(saved.threads)) {
-      state.threads = saved.threads;
-      // Lifetime scoreboard. Older files have no stats: seed from what's on disk.
-      state.stats = saved.stats || {
-        listed: saved.threads.length,
-        done: saved.threads.filter((t) => t.status === 'done').length,
-      };
-      // Older files have no history: seed it from the done rows still on disk.
-      state.history = Array.isArray(saved.history)
-        ? saved.history
-        : saved.threads.filter((t) => t.status === 'done').map(toHistory);
+    // migrate() brings any older file to the current shape without ever dropping an item, and gives
+    // the empty state for "no file yet". Assigned INTO `state`, so it stays the one live object.
+    Object.assign(state, migrate(await persistence.loadThreads()));
+    // A thread saved mid-close (the app quit inside the close beat) was never counted: the score and
+    // history only change when the beat finishes. So put it back on the axis instead of leaving it
+    // stuck in "resolving" with no timer to finish it.
+    state.threads.forEach((t) => { if (t.status === 'resolving') t.status = 'axis'; });
+    onChange();
+  }
+
+  // Capture first, tag after. A new task is untagged (quad null) and sits in the list. Returns the new
+  // id so the UI can flag its row as freshly added (scroll-into-view + highlight): that is
+  // presentation, so it is not part of this state.
+  function addTask(text, body) {
+    const id = newId();
+    const item = { id, text, quad: null, status: 'dump', createdAt: Date.now() };
+    if (body) {
+      item.body = body;
+      item.updatedAt = item.createdAt;
     }
-    onChange();
-  }
-
-  function persist() {
-    persistence.saveThreads(state);
-  }
-
-  // Capture first, tag after. A new task is untagged (quad null) and sits in the list; it only becomes
-  // a thread once it is pushed onto the axis. Returns the new id so the UI can flag its row as freshly
-  // added (scroll-into-view + highlight): that is presentation, so it is not part of this state.
-  function addTask(text) {
-    const id = Date.now().toString(36);
-    state.threads.push({
-      id,
-      text,
-      quad: null,
-      status: 'dump',
-      createdAt: Date.now(),
-    });
+    state.threads.push(item);
     state.stats.listed++;
-    persist();
-    onChange();
+    commit();
+    return id;
+  }
+
+  // A note goes straight to the notes shelf. It is not a task, so it does not count as "listed".
+  function addNote(text, body) {
+    const id = newId();
+    const now = Date.now();
+    const item = { id, text, quad: null, status: 'note', createdAt: now, updatedAt: now };
+    if (body) item.body = body;
+    state.threads.push(item);
+    commit();
     return id;
   }
 
   // Tagging never moves a thread by itself: Q1..Q4 is only ever a label (the paper's point: the tag
   // sets *order*, not placement). Moving between the dump and the axis is always an explicit act:
   // dispatchToAxis / recallToDump below, wired to the row's →/← buttons. Retagging works the same
-  // way regardless of where the thread currently sits.
+  // way regardless of where the thread currently sits. Notes have no tag.
   function tagTask(id, quad) {
-    const t = state.threads.find((x) => x.id === id);
-    if (!t || t.status === 'resolving' || t.status === 'done') return;
+    const t = find(id);
+    if (!t || t.status === 'resolving' || t.status === 'done' || t.status === 'note') return;
     t.quad = quad;
-    persist();
-    onChange();
+    commit();
   }
 
-  // Dump → axis. Any tagged thread can be pushed over at any quad: the tag only ever set order.
+  // Dump → axis. Any tagged thread can be pushed over at any quad: the tag only ever set order. An
+  // untagged one can't (it has no order yet).
   function dispatchToAxis(id) {
-    const t = state.threads.find((x) => x.id === id);
-    if (!t || t.status !== 'dump') return;
+    const t = find(id);
+    if (!t || t.status !== 'dump' || t.quad == null) return;
     t.status = 'axis';
-    persist();
-    onChange();
+    commit();
   }
 
   // Axis → dump. The mirror of dispatchToAxis: for a thread you tagged and pushed over but aren't
   // actually working yet. Nothing is lost: same tag, same row, just off the axis until you push it again.
   function recallToDump(id) {
-    const t = state.threads.find((x) => x.id === id);
+    const t = find(id);
     if (!t || t.status !== 'axis') return;
     t.status = 'dump';
     delete t.focused;
-    persist();
-    onChange();
+    commit();
   }
 
+  // Axis → resolving (drawn crossed off at once, and saved as such only if something else saves
+  // during the beat) → done, once the beat is over.
   function resolveThread(id) {
-    const t = state.threads.find((x) => x.id === id);
-    if (!t) return;
+    const t = find(id);
+    if (!t || t.status !== 'axis') return;
     t.status = 'resolving';
     onChange();
-    setTimeout(() => {
+    closing.set(id, setTimeout(() => {
+      closing.delete(id);
       t.status = 'done';
       t.doneAt = Date.now();
       delete t.focused;
       state.stats.done++;
       state.history.push(toHistory(t));
-      persist();
-      onChange();
-    }, 700);
+      commit();
+    }, CLOSE_BEAT_MS));
   }
 
   // Undo a cross-off: the thread goes straight back on the axis (that is where it was when it got
   // closed) and the scoreboard gives the point back.
   function reopenTask(id) {
-    const t = state.threads.find((x) => x.id === id);
+    const t = find(id);
     if (!t || t.status !== 'done') return;
     t.status = 'axis';
     delete t.doneAt;
     state.stats.done = Math.max(0, state.stats.done - 1);
     state.history = state.history.filter((h) => h.id !== id);
-    persist();
-    onChange();
+    commit();
   }
 
-  function deleteTask(id) {
+  // Dump → note. It was never really a task, so it stops being counted as one.
+  function fileAsNote(id) {
+    const t = find(id);
+    if (!t || t.status !== 'dump') return;
+    t.status = 'note';
+    t.quad = null;
+    t.updatedAt = Date.now();
+    state.stats.listed = Math.max(0, state.stats.listed - 1);
+    commit();
+  }
+
+  // Note → dump: untagged, and counted as a task again.
+  function unfileNote(id) {
+    const t = find(id);
+    if (!t || t.status !== 'note') return;
+    t.status = 'dump';
+    t.updatedAt = Date.now();
+    state.stats.listed++;
+    commit();
+  }
+
+  // The body is free text. Trailing whitespace is trimmed; an empty body removes the key. Saving what
+  // is already there changes nothing (no save, no redraw, no new edit time).
+  function setBody(id, body) {
+    const t = find(id);
+    if (!t || t.status === 'resolving') return;
+    const next = String(body ?? '').replace(/\s+$/, '');
+    if (next === (t.body ?? '')) return;
+    if (next) t.body = next;
+    else delete t.body;
+    t.updatedAt = Date.now();
+    commit();
+  }
+
+  // Renaming. Blank is ignored; a crossed-off item can't be renamed. A fetched link title described
+  // the OLD text, so it goes.
+  function setText(id, text) {
+    const t = find(id);
+    if (!t || t.status === 'resolving' || t.status === 'done') return;
+    const next = String(text ?? '').trim();
+    if (!next || next === t.text) return;
+    t.text = next;
+    delete t.linkTitle;
+    t.updatedAt = Date.now();
+    commit();
+  }
+
+  // A page title fetched for an item whose text is a bare URL. Only applied while the text is still
+  // exactly that URL: the fetch is slow and the item may have been edited or replaced meanwhile.
+  function setLinkTitle(id, url, title) {
+    const t = find(id);
+    const clean = typeof title === 'string' ? title.trim() : '';
+    if (!t || !clean || t.text.trim() !== url) return;
+    t.linkTitle = clean;
+    t.updatedAt = Date.now();
+    commit();
+  }
+
+  // Deleting a task does not shrink the lifetime counters or the crossed-off history. It does cancel a
+  // close in flight, so a deleted thread can't still "complete" (and score) a moment later.
+  function deleteItem(id) {
+    if (!find(id)) return;
+    clearTimeout(closing.get(id));
+    closing.delete(id);
     state.threads = state.threads.filter((x) => x.id !== id);
-    persist();
-    onChange();
+    commit();
   }
 
   // Click an orb: single persistent focus (stored in threads.json). Clicking the focused orb again
   // clears it.
   function toggleFocus(id) {
-    const t = state.threads.find((x) => x.id === id);
+    const t = find(id);
     if (!t || t.status !== 'axis') return;
     const wasFocused = !!t.focused;
     state.threads.forEach((x) => { delete x.focused; });
     if (!wasFocused) t.focused = true;
-    persist();
-    onChange();
+    commit();
   }
 
   return {
     state,
     loadState,
     addTask,
+    addNote,
     tagTask,
     dispatchToAxis,
     recallToDump,
     resolveThread,
     reopenTask,
-    deleteTask,
+    fileAsNote,
+    unfileNote,
+    setBody,
+    setText,
+    setLinkTitle,
+    deleteItem,
     toggleFocus,
   };
 }

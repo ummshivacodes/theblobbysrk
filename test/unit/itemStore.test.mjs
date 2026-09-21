@@ -11,7 +11,12 @@
 // concurrent.
 //
 // Not here on purpose, because it no longer lives in the store: activeThreads (the selectors' tests),
-// COLORS (ui/theme) and the no-DOM rule (the architecture test).
+// COLORS (ui/theme) and the no-DOM rule (the architecture test). The note operations (addNote, fileAsNote,
+// setBody, ...) have their own file: itemStore.notes.test.mjs.
+//
+// A thread cannot be LOADED as "resolving": loadState puts it back on the axis (see the loadState suite).
+// So a test that needs one makes it the honest way, with openWith('resolving'): a real tap on the
+// checkmark of an axis thread, before the 700 ms are up. Those suites run on the fake clock.
 //
 // Run:  node --test "test/unit/**/*.test.mjs"   (quote the glob: a bare `node --test` would also pick
 // up the Electron tests)
@@ -66,6 +71,17 @@ async function openStore(threads, rest = {}) {
   return ctx;
 }
 
+// A store holding one thread, t1, in the given status (plus `others` beside it). "resolving" cannot be
+// loaded, so it is reached by tapping the checkmark; the caller's suite must be on the fake clock.
+async function openWith(status, extra = {}, others = []) {
+  if (status !== 'resolving') return openStore([...others, thread('t1', status, extra)]);
+  const ctx = await openStore([...others, thread('t1', 'axis', extra)]);
+  ctx.store.resolveThread('t1');
+  ctx.calls.saves.length = 0;
+  ctx.calls.changes = 0;
+  return ctx;
+}
+
 const byId = (store, id) => store.state.threads.find((t) => t.id === id);
 const a = (word) => `${/^[aeiou]/.test(word) ? 'an' : 'a'} ${word}`;  // for generated test names
 const effects = (calls) => ({ saves: calls.saves.length, changes: calls.changes });
@@ -93,18 +109,19 @@ function useFakeClock() {
 // ---------- the store ----------
 
 describe('createItemStore', () => {
-  it('starts empty: no threads, a zeroed scoreboard, no history', () => {
+  it('starts empty, in the current file format: no threads, a zeroed scoreboard, no history', () => {
     const { store } = newStore();
-    assert.deepEqual(store.state, { threads: [], stats: { listed: 0, done: 0 }, history: [] });
+    assert.deepEqual(store.state, { version: 2, threads: [], stats: { listed: 0, done: 0 }, history: [] });
   });
 
-  // The API surface is pinned on purpose. When a phase adds operations (addNote and friends), this list
-  // is meant to be edited deliberately in the same commit.
-  it('exposes exactly the live state and nine operations', () => {
+  // The API surface is pinned on purpose. When a phase adds operations, this list is meant to be edited
+  // deliberately in the same commit (Phase 3 added the note operations and renamed deleteTask).
+  it('exposes exactly the live state and fifteen operations', () => {
     const { store } = newStore();
     assert.deepEqual(Object.keys(store).sort(), [
-      'addTask', 'deleteTask', 'dispatchToAxis', 'loadState', 'recallToDump',
-      'reopenTask', 'resolveThread', 'state', 'tagTask', 'toggleFocus',
+      'addNote', 'addTask', 'deleteItem', 'dispatchToAxis', 'fileAsNote', 'loadState', 'recallToDump',
+      'reopenTask', 'resolveThread', 'setBody', 'setLinkTitle', 'setText', 'state', 'tagTask',
+      'toggleFocus', 'unfileNote',
     ]);
     for (const [name, value] of Object.entries(store)) {
       if (name !== 'state') assert.equal(typeof value, 'function', `${name} should be a function`);
@@ -165,6 +182,8 @@ describe('addTask', () => {
 });
 
 describe('tagTask', () => {
+  useFakeClock();
+
   for (const status of ['dump', 'axis']) {
     it(`tagging ${a(status)} thread sets the quad and never changes its status`, async () => {
       const { store } = await openStore([thread('t1', status, { quad: 1 })]);
@@ -195,13 +214,20 @@ describe('tagTask', () => {
 
   for (const status of ['resolving', 'done']) {
     it(`ignores ${a(status)} thread: a crossed-off task cannot be retagged`, async () => {
-      const ctx = await openStore([thread('t1', status, { quad: 1 })]);
+      const ctx = await openWith(status, { quad: 1 });
       assertNoOp(ctx, () => ctx.store.tagTask('t1', 4));
     });
   }
+
+  it('ignores a note: a note has no tag', async () => {
+    const ctx = await openStore([thread('n1', 'note', { quad: null })]);
+    assertNoOp(ctx, () => ctx.store.tagTask('n1', 2));
+  });
 });
 
 describe('dispatchToAxis', () => {
+  useFakeClock();
+
   it('moves a dump thread onto the axis and keeps its tag', async () => {
     const { store } = await openStore([thread('t1', 'dump', { quad: 2 })]);
     store.dispatchToAxis('t1');
@@ -215,15 +241,22 @@ describe('dispatchToAxis', () => {
     assertSavedAndRenderedOnce(calls);
   });
 
-  for (const status of ['axis', 'resolving', 'done']) {
+  for (const status of ['axis', 'resolving', 'done', 'note']) {
     it(`ignores ${a(status)} thread: only a dump thread can be pushed onto the axis`, async () => {
-      const ctx = await openStore([thread('t1', status)]);
+      const ctx = await openWith(status);
       assertNoOp(ctx, () => ctx.store.dispatchToAxis('t1'));
     });
   }
+
+  it('ignores an untagged dump thread: with no tag it has no order yet', async () => {
+    const ctx = await openStore([thread('t1', 'dump', { quad: null })]);
+    assertNoOp(ctx, () => ctx.store.dispatchToAxis('t1'));
+  });
 });
 
 describe('recallToDump', () => {
+  useFakeClock();
+
   it('moves an axis thread back to the dump and keeps its tag', async () => {
     const { store } = await openStore([thread('t1', 'axis', { quad: 3 })]);
     store.recallToDump('t1');
@@ -243,9 +276,9 @@ describe('recallToDump', () => {
     assertSavedAndRenderedOnce(calls);
   });
 
-  for (const status of ['dump', 'resolving', 'done']) {
+  for (const status of ['dump', 'resolving', 'done', 'note']) {
     it(`ignores ${a(status)} thread: only an axis thread can be recalled`, async () => {
-      const ctx = await openStore([thread('t1', status)]);
+      const ctx = await openWith(status);
       assertNoOp(ctx, () => ctx.store.recallToDump('t1'));
     });
   }
@@ -333,19 +366,41 @@ describe('resolveThread', () => {
     assert.equal(saved.history.length, 1);
   });
 
-  // CHARACTERIZATION of today's behaviour, not a rule to keep. resolveThread has no status guard: it
-  // will cross off a thread in any status. Nothing else stops a dump thread getting here, because the
-  // UI only ever calls it for axis threads (the ✓ button and the axis bars are gated on
-  // status === 'axis'). A later phase tightens this to axis-only. When it does, THIS test must change
-  // deliberately (turn it into "ignores a dump thread" beside the other guards); do not delete it quietly.
-  it('CHARACTERIZATION: has no status guard yet, so a dump thread moves to resolving', async () => {
-    const { store } = await openStore([thread('d1', 'dump')]);
-    store.resolveThread('d1');
-    assert.equal(byId(store, 'd1').status, 'resolving');
+  // Only an axis thread can be crossed off. (Before Phase 3 nothing in the store stopped a dump thread
+  // getting here; only the UI's buttons did. This used to be pinned as a CHARACTERIZATION test.)
+  for (const status of ['dump', 'done', 'note']) {
+    it(`ignores ${a(status)} thread: only an axis thread can be crossed off`, async () => {
+      const ctx = await openWith(status);
+      assertNoOp(ctx, () => {
+        ctx.store.resolveThread('t1');
+        mock.timers.tick(RESOLVE_MS); // a wrongly scheduled completion would fire here
+      });
+    });
+  }
+
+  it('a second tap inside the beat does nothing: the point is counted once', async () => {
+    const { store } = await tapCheckmark();
+    store.resolveThread('x1');
+    mock.timers.tick(RESOLVE_MS);
+    assert.deepEqual(store.state.stats, { listed: 1, done: 1 });
+    assert.equal(store.state.history.length, 1);
+  });
+
+  it('deleting the thread inside the beat cancels the close: it never completes, scores or saves', async () => {
+    const { store, calls } = await tapCheckmark();
+    store.deleteItem('x1');
+    const before = { ...effects(calls), stats: structuredClone(store.state.stats) };
+    mock.timers.tick(RESOLVE_MS * 2);
+    assert.deepEqual(store.state.threads, []);
+    assert.deepEqual(store.state.stats, before.stats);
+    assert.deepEqual(store.state.history, []);
+    assert.deepEqual(effects(calls), { saves: before.saves, changes: before.changes });
   });
 });
 
 describe('reopenTask', () => {
+  useFakeClock();
+
   // A done thread that the scoreboard and the history both know about, next to an axis thread and a
   // history entry belonging to some other (already deleted) task.
   const openWithDoneThread = () => openStore(
@@ -385,31 +440,31 @@ describe('reopenTask', () => {
     assert.equal(store.state.stats.done, 0);
   });
 
-  for (const status of ['dump', 'axis', 'resolving']) {
+  for (const status of ['dump', 'axis', 'resolving', 'note']) {
     it(`ignores ${a(status)} thread: only a done thread can be reopened`, async () => {
-      const ctx = await openStore([thread('t1', status)]);
+      const ctx = await openWith(status);
       assertNoOp(ctx, () => ctx.store.reopenTask('t1'));
     });
   }
 });
 
-describe('deleteTask', () => {
+describe('deleteItem', () => {
   it('removes that thread and only that thread', async () => {
     const { store } = await openStore([thread('a', 'dump'), thread('b', 'dump'), thread('c', 'axis')]);
-    store.deleteTask('b');
+    store.deleteItem('b');
     assert.deepEqual(store.state.threads.map((t) => t.id), ['a', 'c']);
   });
 
   it('keeps store.state the same live object', async () => {
     const { store } = await openStore([thread('a', 'dump'), thread('b', 'dump')]);
     const live = store.state;
-    store.deleteTask('a');
+    store.deleteItem('a');
     assert.equal(store.state, live);
   });
 
   it('saves once and notifies once', async () => {
     const { store, calls } = await openStore([thread('a', 'dump')]);
-    store.deleteTask('a');
+    store.deleteItem('a');
     assertSavedAndRenderedOnce(calls);
   });
 
@@ -418,8 +473,8 @@ describe('deleteTask', () => {
       [thread('a', 'dump'), thread('n', 'done')],
       { stats: { listed: 5, done: 2 }, history: [historyEntry('n')] },
     );
-    store.deleteTask('a');
-    store.deleteTask('n');
+    store.deleteItem('a');
+    store.deleteItem('n');
     assert.deepEqual(store.state.stats, { listed: 5, done: 2 });
   });
 
@@ -428,22 +483,29 @@ describe('deleteTask', () => {
       [thread('n', 'done')],
       { stats: { listed: 1, done: 1 }, history: [historyEntry('n')] },
     );
-    store.deleteTask('n');
+    store.deleteItem('n');
     assert.deepEqual(store.state.threads, []);
     assert.deepEqual(store.state.history.map((h) => h.id), ['n']);
   });
 
-  // Only the state is asserted. Unlike the guarded moves, deleteTask has no early return, so today it
-  // also saves and re-renders for an id that is not there; that is not a rule worth pinning.
-  it('ignores an unknown id: the threads stay as they are', async () => {
-    const { store } = await openStore([thread('a', 'dump')]);
-    const before = structuredClone(store.state);
-    store.deleteTask('nope');
-    assert.deepEqual(store.state, before);
+  // Like every other move, deleting something that is not there is a true no-op (before Phase 3 it
+  // still saved and re-rendered).
+  it('ignores an unknown id: no change, no save, no re-render', async () => {
+    const ctx = await openStore([thread('a', 'dump')]);
+    assertNoOp(ctx, () => ctx.store.deleteItem('nope'));
+  });
+
+  it('deletes a note like any other item, and it never counted as listed', async () => {
+    const { store } = await openStore([thread('n1', 'note', { quad: null })], { stats: { listed: 0, done: 0 } });
+    store.deleteItem('n1');
+    assert.deepEqual(store.state.threads, []);
+    assert.deepEqual(store.state.stats, { listed: 0, done: 0 });
   });
 });
 
 describe('toggleFocus', () => {
+  useFakeClock();
+
   const focusedIds = (store) => store.state.threads.filter((t) => t.focused).map((t) => t.id);
 
   it('focuses an axis thread', async () => {
@@ -481,17 +543,16 @@ describe('toggleFocus', () => {
     assert.deepEqual(effects(calls), { saves: 3, changes: 3 });
   });
 
-  for (const status of ['dump', 'resolving', 'done']) {
+  for (const status of ['dump', 'resolving', 'done', 'note']) {
     it(`ignores ${a(status)} thread, leaving the focus alone: only axis threads take focus`, async () => {
       // A is focused, so a refused toggle must not clear it either.
-      const ctx = await openStore([thread('A', 'axis', { focused: true }), thread('t1', status)]);
+      const ctx = await openWith(status, {}, [thread('A', 'axis', { focused: true })]);
       assertNoOp(ctx, () => ctx.store.toggleFocus('t1'));
     });
   }
 });
 
-// The guarded moves treat an id that is not in the list as nothing to do. (deleteTask is covered in its
-// own suite: it has no guard.)
+// Every move treats an id that is not in the list as nothing to do.
 describe('an unknown id', () => {
   useFakeClock();  // so an unknown id that wrongly scheduled a completion would fire inside the test
 
@@ -502,6 +563,7 @@ describe('an unknown id', () => {
     resolveThread: (store) => store.resolveThread('nope'),
     reopenTask: (store) => store.reopenTask('nope'),
     toggleFocus: (store) => store.toggleFocus('nope'),
+    deleteItem: (store) => store.deleteItem('nope'),
   };
 
   for (const [name, move] of Object.entries(guardedMoves)) {
@@ -516,7 +578,7 @@ describe('an unknown id', () => {
 });
 
 describe('loadState', () => {
-  const EMPTY_STATE = { threads: [], stats: { listed: 0, done: 0 }, history: [] };
+  const EMPTY_STATE = { version: 2, threads: [], stats: { listed: 0, done: 0 }, history: [] };
 
   // A file from before the scoreboard and the history existed: threads only (one done, one on the axis).
   const legacyFile = () => ({
@@ -560,7 +622,7 @@ describe('loadState', () => {
       stats: { listed: 9, done: 4 },
       history: [historyEntry('h')],
     };
-    const expected = structuredClone(file);
+    const expected = { ...structuredClone(file), version: 2 };  // an older file is stamped with the current version
     const { store } = newStore(file);
     await store.loadState();
     assert.deepEqual(store.state, expected);
@@ -599,6 +661,38 @@ describe('loadState', () => {
       assert.deepEqual(effects(calls), { saves: 0, changes: 1 });
     });
   }
+
+  it('an older file is upgraded to the current format in memory', async () => {
+    const { store } = newStore(legacyFile());
+    await store.loadState();
+    assert.equal(store.state.version, 2);
+  });
+
+  it('a scoreboard missing a field is reseeded from the threads, not trusted (it used to turn into NaN)', async () => {
+    const { store } = newStore({ threads: [thread('a', 'done'), thread('b', 'axis')], stats: { listed: 2 } });
+    await store.loadState();
+    assert.deepEqual(store.state.stats, { listed: 2, done: 1 });
+  });
+
+  it('a thread saved mid-close goes back on the axis: it was never counted, and no timer will finish it', async () => {
+    const { store, calls } = newStore({
+      threads: [thread('x', 'resolving', { focused: true }), thread('y', 'axis')],
+      stats: { listed: 2, done: 0 },
+      history: [],
+    });
+    await store.loadState();
+    assert.equal(byId(store, 'x').status, 'axis');
+    assert.equal(byId(store, 'x').focused, true, 'nothing else about it changes');
+    assert.deepEqual(store.state.stats, { listed: 2, done: 0 });
+    assert.deepEqual(store.state.history, []);
+    assert.equal(calls.saves.length, 0, 'loading never writes');
+  });
+
+  it('keeps what a newer version of the app wrote, so an older one cannot erase it', async () => {
+    const { store } = newStore({ threads: [], extra: { from: 'a newer app' } });
+    await store.loadState();
+    assert.deepEqual(store.state.extra, { from: 'a newer app' });
+  });
 
   it('fills store.state in place: it stays the same live object', async () => {
     const { store } = newStore(legacyFile());

@@ -61,7 +61,7 @@ const actions = {
   focus: (id) => store.toggleFocus(id),
   remove: (id) => {
     if (hover.get() === id) hover.set(null); // a deleted row can't stay hovered
-    store.deleteTask(id);
+    store.deleteItem(id);
   },
   hover: (id) => hover.set(id),
   openMenu: (x, y, entries) => rowMenu.show(x, y, entries),

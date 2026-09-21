@@ -358,7 +358,11 @@ app.whenReady().then(async () => {
 
   // ---- what ended up on disk ----------------------------------------------------------------------
   const d = disk();
-  expectEq('the file holds exactly threads, stats and history', Object.keys(d).sort(), ['history', 'stats', 'threads']);
+  // DELIBERATE CHANGE (Phase 3): the saved format gained `version` (v2). This is the only check that
+  // changed for the domain work; every behaviour check above is untouched.
+  expectEq('the file holds exactly threads, stats, history and its format version', Object.keys(d).sort(),
+    ['history', 'stats', 'threads', 'version']);
+  check('…and it is version 2', d.version === 2);
   check('every saved thread has only known fields (no UI flags)', d.threads.every((t) =>
     Object.keys(t).every((k) => ['id', 'text', 'quad', 'status', 'createdAt', 'doneAt', 'focused'].includes(k))));
   expectEq('the final saved threads are the ones left on screen', d.threads.map((t) => [t.text, t.status]), [
