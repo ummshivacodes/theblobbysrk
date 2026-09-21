@@ -23,7 +23,9 @@ import {
 // true, because that half of the layout does not exist yet. The owner of the migration flips them at
 // the phase gates: `renderer` once src/ui/ and index.html are the modules from the plan (Phase 1),
 // `main` once main/ and the split preload are in place (Phase 2). The meta-tests ignore these flags.
-const PHASE = { renderer: false, main: false };
+// renderer: true from Phase 1 (renderer.js/taskStore.js retired, index.html is one module script).
+// main: still false — main/ipc.js, main/window.js etc. land in Phase 2 (lane B2).
+const PHASE = { renderer: true, main: false };
 
 const lines = (...parts) => `${parts.join('\n')}\n`;
 
