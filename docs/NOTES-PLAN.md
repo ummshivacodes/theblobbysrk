@@ -1,7 +1,7 @@
 # Blob → on-the-go note taker: implementation plan
 
-Status: **approved direction, not started.** Written 2026-09-21 as a handoff: whoever implements
-this (any model, any session) should be able to work from this file alone.
+Status: **in progress: see section 11 (progress log) for exactly how far it got.** Written 2026-09-21
+as a handoff: whoever implements this (any model, any session) should be able to work from this file alone.
 
 Out of scope, on purpose: phone app, brain map, markdown export, sync, tags. They are deferred,
 and section 8 shows the seam each one will plug into, so none of them forces a rebuild later.
@@ -310,3 +310,37 @@ Each has a natural home; none blocks the notes work.
 | **Axis labels overlap** once about five threads are open (the axis is a fixed 300 units wide). Idea: label only the hovered/focused bar. | Same | `views/axisView.js` |
 | **Ids can collide** if two items are created in the same millisecond (`Date.now().toString(36)`). Unreachable by typing; matters if a paste ever creates several items at once. | Reading `itemStore.addTask` while porting | `core/itemStore.js`: add a counter or random suffix, with a test |
 | **`Esc` with the right-click menu open also collapses the panel** (both handlers fire). | Writing the UI test (deliberately not asserted) | `ui/app.js` |
+
+## 11. Progress log and integration notes
+
+Kept current so a new session (or a different model) can pick up exactly where this stopped.
+
+**2026-09-21**
+- **Phase 0 done** (`16554dc`): `test/app/ui.electron.js` (64 checks) + `test/app/lifecycle.electron.js` (12), shared
+  `scripts/lib/isolatedApp.js` and `test/app/harness.js`, `npm run verify` / `verify:packaged`, readiness flag,
+  SELFTEST/SHOT hooks retired from `main.js`. Verified to catch 3 planted regressions.
+- **Phase 1 renderer split done on branch `phase-1`**: 18 modules under `src/`, the Phase-0 UI test passes with
+  **zero changed lines**. Still open before the phase closes: delete legacy `renderer.js`/`taskStore.js`, port the
+  store tests (lane E), the architecture test (lane D), `verify:packaged`.
+- **Lane C merged** (pure core: `history`, `migrate`, `capture`, `linkify`, `selectors`; 245 tests).
+- **Lane B1 merged** (`main/persistence.js`, `links.js`, `lib/safeUrl.js`, `lib/titleFromHtml.js`; 121 tests).
+- **Lane B2 running** (Phase 2: split `main.js`, wire B1 in, navigation lockdown, additive preload API).
+
+**How the finished pure modules are meant to be used (from the lane reports)**
+- `migrate(saved)` returns a fresh object sharing no memory with its input; `null`/garbage gives the empty state,
+  so `migrate(await loadThreads())` also covers "no file yet". It keeps unknown top-level fields (an older app
+  must not erase what a newer one wrote) and never downgrades a version above 2. In `itemStore.loadState` use
+  `Object.assign(state, migrate(saved))`, not just the four known keys, so `state` stays the same live object.
+- Bare-URL link titles (4e): fetch `toHref(text.trim())`, but pass `text.trim()` itself as `url` to `setLinkTitle`
+  (the "only if the text is still exactly that URL" guard compares against the trimmed text). `linkify` output is
+  not normalised; main re-validates with `safeUrl` and should open `new URL(x).href`.
+- `isBareUrl` is built on `linkify`, so `https://x.org.` and `https://x.org/a)` are correctly *not* bare.
+- `persistence.load()` writes the backup back as the live file after a recovery (otherwise a renderer reload would
+  load nothing and the next save would replace the good backup with an empty state). `save()` renames an
+  unreadable live file aside before the first save of a run, and throws rather than overwrite it. Quarantine files
+  never overwrite an earlier one. A file that parses but is not a state (`{"foo":1}`) must count as unreadable too:
+  that is the `validate` option added in B2.
+- Cache the FIRST `persistence.load()` result in `ipc.js`; a second call returns a clean result, so
+  `getLoadNotice()` must derive from the cached one.
+- Test helpers: `deepFreeze` is duplicated in three of lane C's test files; a shared `test/unit/_helpers.mjs`
+  would remove that (cosmetic).
