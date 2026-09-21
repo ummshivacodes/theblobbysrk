@@ -6,7 +6,7 @@ import { createBodyEditor } from './bodyEditor.js';
 // status; expanded, the item's body sits under it. Pure construction: it never touches the store, and
 // every interaction goes out through `handlers`:
 //   { tag(id, q), startRetag(id), push(id), recall(id), resolve(id), reopen(id), focus(id),
-//     hover(id | null), menu(x, y, item), toggleExpand(id), saveBody(id, body) }
+//     hover(id | null), menu(x, y, item), toggleExpand(id), saveBody(id, body), fileNote(id) }
 
 // A round action button; clicking it must not also count as a click on the row.
 function actionButton(className, text, title, run) {
@@ -18,7 +18,9 @@ function actionButton(className, text, title, run) {
   });
 }
 
-// Untagged: four dots (Q1..Q4).
+// Untagged: four dots (Q1..Q4), and for an item still in the dump a fifth, N: it isn't a task at all, so
+// file it as a note (it leaves this list). N is not a .tag-dot on purpose: it files the item rather than
+// labelling it, and an axis thread can't be filed (it has to be recalled to the dump first).
 function tagDots(item, handlers) {
   const dots = el('div', { className: 'tag-dots' });
   [1, 2, 3, 4].forEach((q) => {
@@ -31,10 +33,18 @@ function tagDots(item, handlers) {
     dot.style.setProperty('--c', COLORS[q]);
     dots.appendChild(dot);
   });
+  if (item.status === 'dump') {
+    dots.appendChild(el('button', {
+      className: 'note-dot',
+      text: 'N',
+      title: 'File as a note (not a task): moves it to your notes',
+      onclick: (e) => { e.stopPropagation(); handlers.fileNote(item.id); },
+    }));
+  }
   return dots;
 }
 
-// Tag state: crossed off → a fixed chip; untagged (or being retagged) → four dots; tagged → one chip
+// Tag state: crossed off → a fixed chip; untagged (or being retagged) → the dots; tagged → one chip
 // (click it to retag).
 function tagControl(item, retagging, handlers) {
   if (item.status === 'done') {

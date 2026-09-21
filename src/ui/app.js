@@ -4,6 +4,7 @@
 // belongs in a module of its own.
 import { createItemStore } from '../core/itemStore.js';
 import { createBridge } from './bridge.js';
+import { createCaptureBox } from './captureBox.js';
 import { createHover } from './hover.js';
 import { createPanel } from './panel.js';
 import { installPressGuard } from './pressGuard.js';
@@ -16,6 +17,7 @@ import { createAxisView } from './views/axisView.js';
 import { createDoneView } from './views/doneView.js';
 import { EDIT_ENDED } from './views/bodyEditor.js';
 import { createInboxView } from './views/inboxView.js';
+import { createNotesBadgeView } from './views/notesBadgeView.js';
 import { createOrbView } from './views/orbView.js';
 import { createScoreView } from './views/scoreView.js';
 
@@ -68,6 +70,7 @@ const actions = {
   reopen: (id) => store.reopenTask(id),
   focus: (id) => store.toggleFocus(id),
   setBody: (id, body) => store.setBody(id, body),
+  fileNote: (id) => store.fileAsNote(id),
   remove: (id) => {
     if (hover.get() === id) hover.set(null); // a deleted row can't stay hovered
     store.deleteItem(id);
@@ -87,8 +90,9 @@ const orb = createOrbView({ bar: $('orbBar') }, pick(actions, ['showTooltip', 'h
 const axis = createAxisView({ svg: $('axisSvg'), count: $('axisCount') }, pick(actions, ['resolve', 'hover']));
 const inbox = createInboxView(
   { list: $('taskList'), count: $('taskCount') },
-  pick(actions, ['tag', 'push', 'recall', 'resolve', 'reopen', 'focus', 'remove', 'setBody', 'hover', 'openMenu']),
+  pick(actions, ['tag', 'push', 'recall', 'resolve', 'reopen', 'focus', 'remove', 'setBody', 'fileNote', 'hover', 'openMenu']),
 );
+const notesBadge = createNotesBadgeView({ button: $('notesBtn'), count: $('notesCount') });
 const score = createScoreView({ done: $('doneCount'), listed: $('listedCount'), active: $('activeCount') });
 const done = createDoneView(
   {
@@ -110,6 +114,7 @@ function drawAll() {
   axis.render(snapshot, ui);
   inbox.render(snapshot, ui);
   score.render(snapshot);
+  notesBadge.render(snapshot);
   done.render(snapshot);
   panel.syncSize();
 }
@@ -143,13 +148,18 @@ store = createItemStore(bridge.persistence, gate.request, {
 });
 
 // ---- wiring --------------------------------------------------------------------------------
-input.addEventListener('keydown', (e) => {
-  if (e.key !== 'Enter' || !e.target.value.trim()) return;
-  const id = store.addTask(e.target.value.trim());
-  // addTask already rendered once (through onChange) before it returned the id, so draw the list once
-  // more with the new row highlighted and scrolled into view.
-  inbox.render(takeSnapshot(store.state), { hoveredId: hover.get(), freshId: id });
-  e.target.value = '';
+// Enter dumps a task, ⌘↵ saves a note; several lines become a title and its notes (see ui/captureBox.js).
+createCaptureBox(input, {
+  onCapture({ text, body, asNote }) {
+    if (asNote) {
+      store.addNote(text, body); // it lands on the header's N button, which pulses (see notesBadgeView)
+      return;
+    }
+    const id = store.addTask(text, body);
+    // addTask already rendered once (through onChange) before it returned the id, so draw the list once
+    // more with the new row highlighted and scrolled into view.
+    inbox.render(takeSnapshot(store.state), { hoveredId: hover.get(), freshId: id });
+  },
 });
 
 $('hideBtn').addEventListener('click', () => bridge.windowCtl.hide());

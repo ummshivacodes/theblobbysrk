@@ -143,13 +143,13 @@ body { display: flex; justify-content: flex-end; align-items: flex-start; }
 
 /* Entry box lives at the bottom; new rows appear directly above it. */
 .quick-add { margin-top: 6px; }
-.quick-add input {
+.quick-add input, .quick-add textarea {
   width: 100%; padding: 7px 9px; border-radius: 7px;
   border: 1px solid rgba(255, 255, 255, 0.15);
   background: rgba(255, 255, 255, 0.06); color: #fff; font-size: 12px;
   outline: none;
 }
-.quick-add input:focus { border-color: rgba(255, 255, 255, 0.35); }
+.quick-add input:focus, .quick-add textarea:focus { border-color: rgba(255, 255, 255, 0.35); }
 
 .section-label {
   font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;

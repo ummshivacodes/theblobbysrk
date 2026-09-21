@@ -52,7 +52,7 @@ So: **ES modules, no bundler, no build step.** Imports make every dependency exp
 
 ```
 index.html                 one <script type="module" src="src/ui/app.js">
-style.css                  existing styles, untouched; new styles go in styles/notes.css
+style.css                  existing styles (one selector widened: the capture box is a textarea now); new styles go in styles/notes.css
 preload.js                 CJS. The only renderer↔Electron bridge (window.threadAxis)
 main.js                    CJS. Composition root of the main process (~40 lines)
 main/
@@ -82,12 +82,14 @@ src/
     hover.js  tooltip.js  rowMenu.js
     renderGate.js          holds a redraw while the user is mid-gesture (pointer down, or typing in a notes editor)
     pressGuard.js          a press on a button doesn't pull focus out of an open editor
+    captureBox.js          what a key in the capture box means (interpretKey is pure and unit-tested) + the wiring
     views/
       orbView.js  axisView.js  scoreView.js  doneView.js
       inboxView.js         main-screen list
       notesView.js         notes screen
       itemRow.js           shared row: expander, title, chip/dots, actions
       bodyEditor.js        read (links clickable) ↔ edit (textarea)
+      notesBadgeView.js    the header's N button: the count, and a pulse when it goes up
 styles/notes.css
 test/unit/*.test.mjs       plain Node: core + main/lib + main/persistence + architecture rules
 test/app/lifecycle.electron.js   (exists; moves here)
@@ -211,8 +213,11 @@ the plan never stated them, so the code was the only spec):
   row; it is brighter when a body exists.
 - **N dot:** files the item; the row leaves the list; the header Notes button pulses and its count
   goes up.
-- **Capture box:** `Enter` = dump (as today). `⌘↵` = save as note. Multi-line paste → title + body.
-  Ignore `Enter` while `e.isComposing`. Placeholder: `dump a task or a thought…   ⌘↵ = note`.
+- **Capture box:** `Enter` = dump (as today). `⌘↵` = save as note. Multi-line paste → title + body. Ignore `Enter`
+  while `e.isComposing`. Placeholder: `dump a task or a thought…   ⌘↵ = note`. It is a `<textarea rows=1>` that grows
+  to four lines (`field-sizing: content`): a one-line `<input>` flattens pasted line breaks before any handler can
+  see them. Shift+Enter is a newline; Ctrl/Alt+Enter are left to the browser. The N dot is a `.note-dot`, not a
+  `.tag-dot` (it files the item rather than labelling it), and only rows still in the dump offer it.
 - **Header:** `Blob  ⌘⇧Y   [✎ n] [⚙] [–] [×]`. `✎` toggles the Notes screen.
 - **Notes screen:** search box (focused on open; every word must match title, body or link title) →
   list, newest edit first (title, first body line, "edited 2h ago") → expand to read/edit →
@@ -426,6 +431,12 @@ Kept current so a new session (or a different model) can pick up exactly where t
   press guard); moving focus from one editor to another could be destroyed by the first one's save (the microtask save);
   the overlay scrollbar sat on top of the → and ✓ buttons (slim scrollbar).
 - **A decision for the owner to review:** `Esc` in a notes editor keeps what was typed (the mockup said "Esc cancel"). See section 5.
+
+- **Phase 4b done** (see `git log`): the N dot (files an item as a note; the row leaves the list), `⌘↵` = note, several
+  lines → title + body, IME-safe Enter, the header N button with its count and a pulse when the count rises
+  (`notesBadgeView`, deciding from the count so every way of adding a note pulses alike and loading does not),
+  `ui/captureBox.js` (12 unit tests for the key rules). The capture box became a textarea. The Phase-0 test still
+  passes unchanged (64/64); the notes test gained the 4b checks.
 
 **Lessons for whoever writes the next Electron test** (learned the hard way: about 150 test launches, most of them
 chasing flakes that were the machine, not the code)

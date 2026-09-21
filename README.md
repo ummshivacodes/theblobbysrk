@@ -45,7 +45,15 @@ npm start
 
 ## Use it
 - Type a task in the box at the bottom, hit Enter. It appears as a row
-  above the box, untagged, with four small Q1–Q4 dots.
+  above the box, untagged, with four small Q1–Q4 dots and a violet **N**.
+  Several lines (Shift+Enter, or pasted): the first line is the title and the
+  rest become the row's notes.
+- **⌘↵ instead of Enter** saves it as a note, not a task: it never shows up in
+  the list, and the header's **N** counts it (it pulses when the count goes up;
+  the screen for reading your notes is the next step of the notes work).
+- **N beside Q1–Q4** does the same for something already in the dump: it isn't
+  a task, so it leaves the list and stops counting toward "Done x/y". Only
+  items still in the dump can be filed; recall an axis thread first.
 - **Tap a dot** to tag it. Tagging never moves it by itself — it only sets
   order (the paper's point). Tap the coloured chip any time, on a dump or
   an axis row, to retag.
@@ -91,9 +99,9 @@ step: `index.html` loads one entry point, `src/ui/app.js`.
 
 | Where | Role | May import |
 |---|---|---|
-| `src/core/` | Pure logic. `itemStore.js`: the item state machine — tasks (`addTask`, `tagTask`, `dispatchToAxis`, `recallToDump`, `resolveThread`, `reopenTask`) and notes (`addNote`, `fileAsNote`, `unfileNote`, `setBody`, `setText`, `setLinkTitle`), plus `deleteItem` and `toggleFocus` for either. `selectors.js`, `capture.js`, `linkify.js`, `migrate.js` (schema v2). No DOM, no Electron, no I/O: persistence and the change callback are injected. It runs in plain Node, which is where it is tested, and a phone app could reuse it unchanged. The UI so far calls only `setBody` (the notes editor); filing notes, the Notes screen and links arrive with the rest of Phase 4. | only other `src/core/` files |
-| `src/ui/views/` | One file per thing on screen: `orbView`, `axisView`, `inboxView`, `scoreView`, `doneView`, plus `itemRow` (one row) and `bodyEditor` (an item's notes: read text ↔ textarea). A view is `createXView(elements, actions)` returning `{ render(snapshot, ui), applyHover?(id) }`. It draws from a **frozen snapshot** and reports what the user did through `actions`. It can't reach the store or the bridge. | `ui/dom`, `ui/theme`, `ui/format`, `views/itemRow`, `views/bodyEditor`, `core/selectors`, `core/linkify` |
-| `src/ui/` | The page's machinery, one job per file: `bridge` (the only file that reads `window.threadAxis`), `snapshot`, `hover`, `panel` (fold-out animation + window sizing), `renderGate` (holds a redraw while the user is mid-gesture), `pressGuard` (a press on a button doesn't pull focus out of an open editor), `screens`, `tooltip`, `rowMenu`, `dom`, `format`, `theme`. | each other, sparingly |
+| `src/core/` | Pure logic. `itemStore.js`: the item state machine — tasks (`addTask`, `tagTask`, `dispatchToAxis`, `recallToDump`, `resolveThread`, `reopenTask`) and notes (`addNote`, `fileAsNote`, `unfileNote`, `setBody`, `setText`, `setLinkTitle`), plus `deleteItem` and `toggleFocus` for either. `selectors.js`, `capture.js`, `linkify.js`, `migrate.js` (schema v2). No DOM, no Electron, no I/O: persistence and the change callback are injected. It runs in plain Node, which is where it is tested, and a phone app could reuse it unchanged. The UI so far calls `setBody` (the notes editor), `addNote` (⌘↵) and `fileAsNote` (the N dot); the Notes screen, `unfileNote` and links arrive with the rest of Phase 4. | only other `src/core/` files |
+| `src/ui/views/` | One file per thing on screen: `orbView`, `axisView`, `inboxView`, `scoreView`, `doneView`, plus `itemRow` (one row), `bodyEditor` (an item's notes: read text ↔ textarea) and `notesBadgeView` (the header's N and its count). A view is `createXView(elements, actions)` returning `{ render(snapshot, ui), applyHover?(id) }`. It draws from a **frozen snapshot** and reports what the user did through `actions`. It can't reach the store or the bridge. | `ui/dom`, `ui/theme`, `ui/format`, `views/itemRow`, `views/bodyEditor`, `core/selectors`, `core/linkify` |
+| `src/ui/` | The page's machinery, one job per file: `bridge` (the only file that reads `window.threadAxis`), `snapshot`, `hover`, `panel` (fold-out animation + window sizing), `renderGate` (holds a redraw while the user is mid-gesture), `pressGuard` (a press on a button doesn't pull focus out of an open editor), `captureBox` (what a key in the capture box means: Enter, ⌘↵, several lines, input methods; a pure function, unit-tested), `screens`, `tooltip`, `rowMenu`, `dom`, `format`, `theme`. | each other, sparingly |
 | `src/ui/app.js` | The composition root. Looks up the page's elements (the only file that knows the ids in `index.html`), creates the store and the views, and hands each only the elements and actions it needs. | everything in `src/` |
 | `style.css`, `styles/` | Styling. `style.css` is the original; each new feature adds a file under `styles/` (loaded after it by `index.html`) instead of growing it. | – |
 | `preload.js` | The only bridge between the page and Electron (IPC): `window.threadAxis`. | Electron |
@@ -171,8 +179,9 @@ Same requirements as `test:app` below.
 ```
 npm run test:notes
 ```
-The same kind of test for the notes UI (the ▸ expander and the body editor so
-far; later steps add filing, the Notes screen and links). It is a separate file
+The same kind of test for the notes UI (the ▸ expander and body editor, the N
+dot, ⌘↵ and multi-line capture so far; later steps add the Notes screen and
+links). It is a separate file
 on purpose: `test:ui` pins today's behaviour and stays unchanged, this one grows
 with the feature. It covers typing, autosave, ⌘↵ and Esc, the redraw being held
 while you type, the panel not folding mid-sentence, hiding the window while

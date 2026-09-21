@@ -6,7 +6,7 @@ import { buildRow } from './itemRow.js';
 // that fit its status. Owns the UI state that must not live on the data: which rows are being retagged
 // and which are expanded to show their body.
 //   els = { list, count }
-//   actions = { tag, push, recall, resolve, reopen, focus, remove, setBody, hover, openMenu(x, y, entries) }
+//   actions = { tag, push, recall, resolve, reopen, focus, remove, setBody, fileNote, hover, openMenu(x, y, entries) }
 const clip = (text) => (text.length > 24 ? `${text.slice(0, 23)}…` : text);
 
 export function createInboxView({ list, count }, actions) {
@@ -34,6 +34,7 @@ export function createInboxView({ list, count }, actions) {
       redraw();
     },
     saveBody: actions.setBody,
+    fileNote: actions.fileNote,
     push: actions.push,
     recall: actions.recall,
     resolve: actions.resolve,

@@ -20,6 +20,7 @@
           <span class="title">Blob</span>
           <span class="hotkey-hint">⌘⇧Y</span>
           <div class="win-actions">
+            <button id="notesBtn" class="icon-btn notes-btn" title="Notes" aria-label="Notes"><span class="notes-letter">N</span><span id="notesCount" class="notes-count"></span></button>
             <button id="gearBtn" class="icon-btn gear" title="Crossed off &amp; settings">⚙</button>
             <button id="hideBtn" class="icon-btn" title="Hide (⌘⇧Y, the menu bar blob, or the Dock icon brings it back)">–</button>
             <button id="quitBtn" class="icon-btn" title="Quit">×</button>
@@ -39,7 +40,7 @@
         </div>
 
         <div class="quick-add">
-          <input id="taskInput" type="text" placeholder="dump a task… (tag it after)" autofocus />
+          <textarea id="taskInput" rows="1" spellcheck="false" placeholder="dump a task or a thought…   ⌘↵ = note" autofocus></textarea>
         </div>
         </div><!-- /mainScreen -->
 
