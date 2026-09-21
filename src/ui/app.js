@@ -74,6 +74,8 @@ const actions = {
   setBody: (id, body) => store.setBody(id, body),
   fileNote: (id) => store.fileAsNote(id),
   unfile: (id) => store.unfileNote(id),
+  // Fire and forget: the main process checks the address and hands it to the browser.
+  openLink: (href) => { Promise.resolve(bridge.links.openExternal(href)).catch(() => {}); },
   remove: (id) => {
     if (hover.get() === id) hover.set(null); // a deleted row can't stay hovered
     store.deleteItem(id);
@@ -93,11 +95,11 @@ const orb = createOrbView({ bar: $('orbBar') }, pick(actions, ['showTooltip', 'h
 const axis = createAxisView({ svg: $('axisSvg'), count: $('axisCount') }, pick(actions, ['resolve', 'hover']));
 const inbox = createInboxView(
   { list: $('taskList'), count: $('taskCount') },
-  pick(actions, ['tag', 'push', 'recall', 'resolve', 'reopen', 'focus', 'remove', 'setBody', 'fileNote', 'hover', 'openMenu']),
+  pick(actions, ['tag', 'push', 'recall', 'resolve', 'reopen', 'focus', 'remove', 'setBody', 'fileNote', 'openLink', 'hover', 'openMenu']),
 );
 const notes = createNotesView(
   { search: $('notesSearch'), list: $('noteList'), count: $('noteCount') },
-  pick(actions, ['unfile', 'remove', 'setBody', 'openMenu']),
+  pick(actions, ['unfile', 'remove', 'setBody', 'openLink', 'openMenu']),
 );
 const notesBadge = createNotesBadgeView({ button: $('notesBtn'), count: $('notesCount') });
 

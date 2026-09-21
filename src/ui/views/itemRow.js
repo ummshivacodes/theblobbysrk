@@ -1,4 +1,5 @@
-import { el } from '../dom.js';
+import { linkify } from '../../core/linkify.js';
+import { el, renderSegments } from '../dom.js';
 import { firstLine, fmtAgo } from '../format.js';
 import { COLORS } from '../theme.js';
 import { createBodyEditor } from './bodyEditor.js';
@@ -7,7 +8,7 @@ import { createBodyEditor } from './bodyEditor.js';
 // status; expanded, the item's body sits under it. Pure construction: it never touches the store, and
 // every interaction goes out through `handlers`:
 //   { tag(id, q), startRetag(id), push(id), recall(id), resolve(id), reopen(id), focus(id),
-//     hover(id | null), menu(x, y, item), toggleExpand(id), saveBody(id, body), fileNote(id), unfile(id) }
+//     hover(id | null), menu(x, y, item), toggleExpand(id), saveBody(id, body), fileNote(id), unfile(id), openLink(href) }
 
 // A round action button; clicking it must not also count as a click on the row.
 function actionButton(className, text, title, run) {
@@ -122,9 +123,9 @@ export function buildRow(item, { retagging, fresh, expanded = false, autofocusBo
 
   const text = el('span', {
     className: 'task-text',
-    text: item.text,
     title: item.status === 'axis' ? 'Click to focus this thread' : item.text,
   });
+  renderSegments(text, linkify(item.text), { onLink: handlers.openLink });
   text.onclick = () => {
     if (item.status === 'axis') handlers.focus(item.id);
     else if (item.status === 'note') handlers.toggleExpand(item.id); // a note's title opens it
@@ -144,7 +145,7 @@ export function buildRow(item, { retagging, fresh, expanded = false, autofocusBo
     const editor = createBodyEditor(
       // A task mid-close can't be edited (the store refuses), so don't offer it.
       { item, readOnly: item.status === 'resolving', autofocus: autofocusBody },
-      { save: (body) => handlers.saveBody(item.id, body) },
+      { save: (body) => handlers.saveBody(item.id, body), openLink: handlers.openLink },
     );
     row.appendChild(editor.node);
   }

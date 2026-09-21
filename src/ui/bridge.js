@@ -18,6 +18,12 @@ export function createBridge(api = window.threadAxis) {
       getLoginItem: () => api.getLoginItem(),
       setLoginItem: (on) => api.setLoginItem(on),
     },
+    // Links: open one in the browser, and fetch the title of a page. Main checks every address again (http and
+    // https only) whatever the page already checked.
+    links: {
+      openExternal: (url) => api.openExternal(url),
+      fetchTitle: (url) => api.fetchTitle(url),
+    },
     // The window telling us it was revealed (hotkey, tray, Dock) or hidden.
     lifecycle: {
       onShown: (cb) => api.onShown(cb),

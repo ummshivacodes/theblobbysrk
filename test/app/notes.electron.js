@@ -13,7 +13,7 @@
 // blur and focus events do not depend on which window is active. The pointer checks use real (trusted)
 // input events injected straight into the page, which bypass all of that: the bugs they guard against, a
 // click lost to the page shifting under it, cannot be reproduced with synthetic ones.
-const { app: electronApp } = require('electron');
+const { app: electronApp, shell } = require('electron');
 const { bootIsolatedApp } = require('../../scripts/lib/isolatedApp.js');
 const { sleep, waitFor, createReporter } = require('./harness.js');
 
@@ -29,6 +29,13 @@ const { sleep, waitFor, createReporter } = require('./harness.js');
 // timing-sensitive check flaky. (The real show/hide wiring is covered by test/app/lifecycle.electron.js
 // and test/app/ui.electron.js; here only the page's reaction to those two events matters.)
 let sendToPage;
+
+// Nothing this test does may open the person's real browser. The main process's link service calls
+// shell.openExternal at call time, so replacing it here is enough; the test proves that it worked (a
+// pre-flight through the real page → main chain) before it clicks a single link.
+const opened = []; // every address the page asked to open
+shell.openExternal = async (url) => { opened.push(url); };
+
 electronApp.on('browser-window-created', (event, w) => {
   w.setFocusable(false);
   w.setIgnoreMouseEvents(true);
@@ -80,6 +87,8 @@ function pageDriver() {
   const row = (text, list) => need(rowEl(text, list), `row "${text}" in ${list || '#taskList'}`);
   const inRow = (text, sel, list) => need($(sel, row(text, list)), `${sel} in row "${text}"`);
 
+  const linkIn = (text, where, index, list) => need($$(where === 'title' ? '.task-text .link' : '.body-read .link', row(text, list))[index], `${where} link ${index} in "${text}"`);
+
   // What one row looks like, for either list.
   function describe(r) {
     const exp = $('.row-expander', r);
@@ -97,6 +106,8 @@ function pageDriver() {
       dots: $$('.tag-dot', r).map((d) => d.textContent),
       noteDot: !!$('.note-dot', r),
       chip: $('.tag-chip', r) ? $('.tag-chip', r).textContent : null,
+      titleLinks: $$('.task-text .link', r).map((a) => ({ text: a.textContent, title: a.title })),
+      bodyLinks: $$('.body-read .link', r).map((a) => ({ text: a.textContent, title: a.title })),
       snippet: $('.note-snippet', r) ? $('.note-snippet', r).textContent : null,
       when: $('.note-when', r) ? $('.note-when', r).textContent : null,
     };
@@ -114,6 +125,8 @@ function pageDriver() {
       capture: { value: $('#taskInput').value, placeholder: $('#taskInput').placeholder, tag: $('#taskInput').tagName },
       badge: { text: $('#notesBtn').textContent, count: $('#notesCount').textContent, pulsing: $('#notesBtn').classList.contains('pulse') },
       dump: $('#taskCount').textContent,
+      anchorsWithHref: document.querySelectorAll('a[href]').length,
+      path: location.pathname,
       active: active && active !== document.body ? `${active.tagName.toLowerCase()}${active.className ? `.${String(active.className).split(' ')[0]}` : ''}` : null,
       rows: $$('#taskList .task-row').map(describe),
       screen: $('#mainScreen').classList.contains('active') ? 'main'
@@ -173,6 +186,12 @@ function pageDriver() {
       const box = $('#taskInput');
       box.value = value;
       box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...init }));
+      return snapshot();
+    },
+    // A link in a row: 'title' or 'body', which one, and either click it or press Enter on it.
+    linkClick: (text, where, index, list) => { linkIn(text, where, index, list).click(); return snapshot(); },
+    linkEnter: (text, where, index, list) => {
+      linkIn(text, where, index, list).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
       return snapshot();
     },
     dotClick: (text, n) => { $$('.tag-dot', row(text))[n - 1].click(); return snapshot(); },
@@ -547,6 +566,60 @@ app.whenReady().then(async () => {
   await act('pageKey', 'Escape');
   s = await until((x) => x.screen === 'main');
   check('(setup) back on the main screen for what follows', !!s, why(s));
+
+  // ---- 4d: links ---------------------------------------------------------------------------------------------------------------------------
+  // Pre-flight: prove the stub catches an open request all the way from the page, BEFORE any link is clicked.
+  await win.webContents.executeJavaScript(`window.threadAxis.openExternal('https://example.invalid/blob-test-preflight')`);
+  if (!check('(setup) opening a link cannot reach the real browser: the request is caught by the test',
+    await waitFor(() => opened.length === 1) && opened[0] === 'https://example.invalid/blob-test-preflight', JSON.stringify(opened))) return finish();
+  opened.length = 0;
+
+  const linkRow = 'read https://example.com/guide now';
+  s = await act('capture', linkRow);
+  check('a link in a title is a link, and the title still reads exactly as written',
+    !!rowOf(s, linkRow) && rowOf(s, linkRow).titleLinks.length === 1 && rowOf(s, linkRow).titleLinks[0].text === 'https://example.com/guide');
+  check('…it is not a real <a href> (the page itself can never navigate), and it says where it goes',
+    s.anchorsWithHref === 0 && rowOf(s, linkRow).titleLinks[0].title === 'https://example.com/guide');
+  await act('linkClick', linkRow, 'title', 0);
+  check('clicking it asks the main process to open it in the browser', await waitFor(() => opened.length === 1) && opened[0] === 'https://example.com/guide', JSON.stringify(opened));
+  s = await act('snapshot');
+  check('…and the page itself stays where it was', s.path.endsWith('index.html') && s.anchorsWithHref === 0);
+
+  await act('expander', linkRow);
+  await until((x) => rowOf(x, linkRow).body && rowOf(x, linkRow).body.focused);
+  await act('type', linkRow, 'docs: https://example.com/docs. Also www.example.org, and (see https://example.net/a).');
+  await act('blurActive');
+  s = await until((x) => rowOf(x, linkRow).body && rowOf(x, linkRow).body.mode === 'read');
+  expectEq('links in the notes are found the way a person reads them: no full stop or bracket stuck on the end',
+    s && rowOf(s, linkRow).bodyLinks.map((l) => l.text), ['https://example.com/docs', 'www.example.org', 'https://example.net/a']);
+  expectEq('…and each says where it goes (www. becomes https://www.)',
+    rowOf(s, linkRow).bodyLinks.map((l) => l.title), ['https://example.com/docs', 'https://www.example.org', 'https://example.net/a']);
+  for (const index of [0, 1, 2]) await act('linkClick', linkRow, 'body', index);
+  check('clicking them opens each one', await waitFor(() => opened.length === 4), JSON.stringify(opened));
+  expectEq('…exactly those addresses, tidied by the main process', opened.slice(1), ['https://example.com/docs', 'https://www.example.org/', 'https://example.net/a']);
+  s = await act('snapshot');
+  check('…and clicking a link does not switch the notes into edit mode', rowOf(s, linkRow).body.mode === 'read');
+  await act('linkEnter', linkRow, 'body', 0);
+  check('Enter on a focused link opens it too', await waitFor(() => opened.length === 5) && opened[4] === 'https://example.com/docs');
+  await act('expander', linkRow); // close it
+
+  const lookalike = 'javascript:alert(1) and example.com and file:///etc/passwd and mailto:a@b.co';
+  s = await act('capture', lookalike);
+  check('text that only looks like a link stays text: javascript:, file:, mailto: and a bare domain',
+    !!rowOf(s, lookalike) && rowOf(s, lookalike).titleLinks.length === 0);
+
+  await act('click', '#notesBtn');
+  await until((x) => x.screen === 'notes');
+  const noteLink = 'https://example.com/from-the-notes-screen';
+  s = await act('noteCapture', noteLink);
+  check('a link that is a note\'s whole title is a link on the Notes screen too', !!noteOf(s, noteLink) && noteOf(s, noteLink).titleLinks.length === 1);
+  s = await act('linkClick', noteLink, 'title', 0, '#noteList');
+  check('…clicking it opens the link and does not open the note', await waitFor(() => opened.length === 6)
+    && opened[5] === noteLink && !noteOf(s, noteLink).expander.open, JSON.stringify(opened));
+  await act('pageKey', 'Escape');
+  s = await until((x) => x.screen === 'main');
+  check('(setup) back on the main screen', !!s, why(s));
+  check('nothing else was opened along the way', opened.length === 6, JSON.stringify(opened));
 
   // ---- a real press on a button while an editor has focus ---------------------------------------------------------------------
   // Typing a note, then clicking ✓ on the row below it, must work with ONE click. If the press pulled focus

@@ -79,6 +79,10 @@ npm start
   ▸) to read or edit it. **↩** sends a note back to the task dump as an untagged
   task; right-click → Delete removes it. The box at the bottom takes a new note
   (Enter saves it). Esc, or the N again, returns to the main screen.
+- **Links** (`http://`, `https://` or `www.`) in a title or in a row's notes are
+  clickable and open in your default browser (Enter on a focused link works
+  too). Only web addresses count: `javascript:`, `file:`, `mailto:` and bare
+  domains stay plain text, on purpose.
 - **▸ on any row** opens its notes: room for more than a title. A row with no
   notes opens a text box with the cursor in it; otherwise you see the text as
   written, and clicking it edits. It saves as you type (a moment after you
@@ -141,7 +145,11 @@ Rules that keep it rebuildable:
   by each view repainting its own elements (`applyHover`), never by one view
   reaching into another's DOM.
 - **Nothing parses markup:** `innerHTML` is only ever assigned `''` (to clear).
-  Text goes through `textContent`, SVG through `svgEl`.
+  Text goes through `textContent`, SVG through `svgEl`, and text that may hold
+  links goes through `core/linkify` then `renderSegments` (nodes, one at a time).
+  A link is not a real `<a href>`: the page must never be able to navigate, so
+  the click goes to the main process, which checks the address again (web
+  addresses only) before opening it.
 - **A bar outlives the snapshot it was drawn from,** so click handlers on
   long-lived elements look the item up in the *latest* snapshot rather than
   trusting the one they were created with.
@@ -166,7 +174,8 @@ in-memory persistence object (every transition and its no-op cases; the 700 ms
 close animation runs on mock timers), the pure logic in `src/core/` (selectors,
 capture, link detection, data migration), the main-process helpers in `main/`
 (safe saving with backups, link fetching), and the small UI helpers that need no
-DOM (snapshot freezing, hover, timestamp formatting, the redraw gate). Change a transition,
+DOM (snapshot freezing, hover, timestamp formatting, the redraw gate, the
+capture box's key rules). Change a transition,
 change its test.
 
 ```
@@ -185,8 +194,10 @@ Same requirements as `test:app` below.
 npm run test:notes
 ```
 The same kind of test for the notes UI (the ▸ expander and body editor, the N
-dot, ⌘↵ and multi-line capture, and the Notes screen: search, editing, back to
-the dump, delete, the new-note box; the next step adds links). It is a separate file
+dot, ⌘↵ and multi-line capture, the Notes screen: search, editing, back to
+the dump, delete, the new-note box, and links). It stubs `shell.openExternal`, so
+no test ever opens your real browser, and it proves the stub works before it
+clicks a link. It is a separate file
 on purpose: `test:ui` pins today's behaviour and stays unchanged, this one grows
 with the feature. It covers typing, autosave, ⌘↵ and Esc, the redraw being held
 while you type, the panel not folding mid-sentence, hiding the window while

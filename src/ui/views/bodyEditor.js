@@ -1,4 +1,5 @@
-import { el } from '../dom.js';
+import { linkify } from '../../core/linkify.js';
+import { el, renderSegments } from '../dom.js';
 
 // The body of one item, under its row: the text as written (read mode) that turns into a textarea when
 // you click it (edit mode). Used by every list that shows items, so a task and a note edit the same way.
@@ -58,8 +59,9 @@ const hasSelection = () => !!window.getSelection && window.getSelection().toStri
 
 // item: the item being shown ({ id, body?, status }).
 // options: { readOnly?: boolean (no editing, e.g. while a task is mid-close), autofocus?: boolean }
-// actions: { save(body) }  — called with the draft; the store decides what is stored.
-export function createBodyEditor({ item, readOnly = false, autofocus = false }, { save }) {
+// actions: { save(body), openLink(href) }  — save is called with the draft (the store decides what is
+// stored); openLink is for a link clicked in the text.
+export function createBodyEditor({ item, readOnly = false, autofocus = false }, { save, openLink }) {
   const node = el('div', { className: 'body-area' });
   let mode = 'read';           // 'read' | 'edit'
   let stored = item.body ?? ''; // what was last handed to save(), so an unchanged draft saves nothing
@@ -83,10 +85,9 @@ export function createBodyEditor({ item, readOnly = false, autofocus = false }, 
   function showRead() {
     mode = 'read';
     const text = trimEnd(draft);
-    const read = el('div', {
-      className: `body-read${text ? '' : ' empty'}`,
-      text: text || 'No notes',
-    });
+    const read = el('div', { className: `body-read${text ? '' : ' empty'}` });
+    if (text) renderSegments(read, linkify(text), { onLink: openLink });
+    else read.textContent = 'No notes';
     if (!readOnly) {
       read.title = 'Click to edit';
       read.setAttribute('tabindex', '0');

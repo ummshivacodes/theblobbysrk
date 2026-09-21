@@ -8,7 +8,7 @@ import { buildRow } from './itemRow.js';
 // never on the axis) and a ↩ that sends it back to the task dump.
 // It owns the UI state that must not live on the data: the search text and which notes are open.
 //   els = { search, list, count }
-//   actions = { unfile, remove, setBody, openMenu(x, y, entries) }
+//   actions = { unfile, remove, setBody, openLink, openMenu(x, y, entries) }
 const clip = (text) => (text.length > 24 ? `${text.slice(0, 23)}…` : text);
 
 export function createNotesView({ search, list, count }, actions) {
@@ -25,6 +25,7 @@ export function createNotesView({ search, list, count }, actions) {
     toggleExpand: (id) => { openBodies.toggle(id); redraw(); },
     saveBody: actions.setBody,
     unfile: actions.unfile,
+    openLink: actions.openLink,
     menu: (x, y, item) => actions.openMenu(x, y, [
       { label: `Delete "${clip(item.text)}"`, onSelect: () => actions.remove(item.id) },
     ]),

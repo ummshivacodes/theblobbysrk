@@ -22,3 +22,26 @@ export function svgEl(name, attrs = {}) {
   Object.entries(attrs).forEach(([k, v]) => node.setAttribute(k, v));
   return node;
 }
+
+// Fill `parent` with the pieces of some text as core/linkify split it: plain text as text nodes, each link as
+// a clickable element. Built node by node, never from markup, so nothing a note contains can inject any.
+// A link is deliberately NOT an <a href>: the page must never be able to navigate, so the click is handled
+// here and handed to `onLink(href)`, which asks the main process (it checks the address again) to open it in
+// the browser. Enter opens a focused link too.
+export function renderSegments(parent, segments, { onLink }) {
+  segments.forEach((segment) => {
+    if (segment.type !== 'link') {
+      parent.appendChild(document.createTextNode(segment.value));
+      return;
+    }
+    const link = el('a', { className: 'link', text: segment.value, title: segment.href, attrs: { role: 'link', tabindex: 0 } });
+    const open = (e) => {
+      e.preventDefault();
+      e.stopPropagation(); // a click on a link is not also a click on the row or the notes text around it
+      onLink(segment.href);
+    };
+    link.addEventListener('click', open);
+    link.addEventListener('keydown', (e) => { if (e.key === 'Enter') open(e); });
+    parent.appendChild(link);
+  });
+}

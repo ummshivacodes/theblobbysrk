@@ -447,6 +447,12 @@ Kept current so a new session (or a different model) can pick up exactly where t
   empty states. `createOpenBodies()` (in `bodyEditor.js`) is the one place that knows which bodies are open and who gets
   the caret; the inbox and the Notes list both use it instead of each keeping a copy. 1,042 unit tests.
 
+- **Phase 4d done** (see `git log`): links in titles and in notes. `renderSegments` (in `ui/dom.js`) turns `core/linkify`'s
+  segments into nodes; a link has no `href` attribute (the page can never navigate) and opens through
+  `bridge.links.openExternal` → `main/links.js`, which checks the address again. Enter opens a focused link; a click on a
+  link is not also a click on its row or on the notes text around it. The notes test stubs `shell.openExternal` and proves
+  the stub works through the real page → main chain before it clicks anything.
+
 **Lessons for whoever writes the next Electron test** (learned the hard way: about 150 test launches, most of them
 chasing flakes that were the machine, not the code)
 1. **Seal the window at creation** (`app.on('browser-window-created')`: `setFocusable(false)`, `setIgnoreMouseEvents(true)`).
@@ -464,6 +470,10 @@ chasing flakes that were the machine, not the code)
    during the animation scrolls the panel itself, and the target ends up 200+ px from where you aimed.
 6. **Give a real click somewhere to land:** rows below the target, or the list clamps its scroll position and hides the bug;
    and aim off-centre of buttons at the right edge (overlay scrollbars).
-7. **Don't loop.** Run each Electron test once, twice at most. A failure that changes from run to run is the environment: get
+7. **Stub every outside effect, and prove the stub first.** The main process's link service calls `shell.openExternal` and
+   `net.fetch` at call time, so replacing them on the `electron` module object in the test is enough; then push one request
+   through the real page → main chain to an `.invalid` address and stop the test if it wasn't caught. No test may open the
+   owner's browser or reach the network.
+8. **Don't loop.** Run each Electron test once, twice at most. A failure that changes from run to run is the environment: get
    one trace (log `focus()`/`blur()` call stacks, textarea removals, main-process show/hide events), find the cause, fix it
    once, and stop. Each run puts a window on the owner's screen.

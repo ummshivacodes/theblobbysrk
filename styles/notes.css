@@ -108,3 +108,10 @@
 .task-row .task-act.unfile:hover { background: var(--note); color: #1a1530; }
 
 .notes-empty { padding: 14px 6px; font-size: 11px; line-height: 1.5; opacity: 0.55; }
+
+/* ---------- Links in titles and notes ---------- */
+.link {
+  color: #8ab4ff; cursor: pointer; text-decoration: underline;
+  text-decoration-color: rgba(138, 180, 255, 0.4); text-underline-offset: 2px;
+}
+.link:hover, .link:focus-visible { text-decoration-color: currentColor; outline: none; }
