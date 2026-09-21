@@ -813,3 +813,91 @@ describe('notes never take part in the task machinery', () => {
     assert.equal(h.row('d').focused, true);
   });
 });
+
+// ---------------------------------------------------------------------------------------------------
+// Input hardening. The store owns the shape of its data whoever calls it, so a title is a trimmed,
+// non-blank string and a body is a string with its tail trimmed. These rules were not in the plan's
+// table: lane F found the gaps by probing the store after writing the tests above, and they are pinned
+// here so they are decisions, not accidents.
+// ---------------------------------------------------------------------------------------------------
+describe('input hardening: what the store accepts when creating or retitling', () => {
+  const BLANKS = ['', '   ', '\n\t ', undefined, null, 42, {}, ['x'], true];
+
+  for (const [name, make] of [['addTask', (s, v) => s.addTask(v)], ['addNote', (s, v) => s.addNote(v)]]) {
+    for (const blank of BLANKS) {
+      it(`${name}(${JSON.stringify(blank) ?? String(blank)}) captures nothing: returns null, a true no-op`, async () => {
+        const h = await setup([]);
+        assertNoOp(h, () => assert.equal(make(h.store, blank), null), `${name} with a blank title`);
+      });
+    }
+
+    it(`${name} stores the title trimmed`, async () => {
+      const h = await setup([]);
+      const id = make(h.store, '  spaced out  ');
+      assert.equal(h.row(id).text, 'spaced out');
+    });
+  }
+
+  for (const [name, make] of [['addTask', (s, b) => s.addTask('t', b)], ['addNote', (s, b) => s.addNote('t', b)]]) {
+    it(`${name} trims the end of a body, and keeps the start`, async () => {
+      const h = await setup([]);
+      const id = make(h.store, '  keep the lead\nand the middle   \n\n  ');
+      assert.equal(h.row(id).body, '  keep the lead\nand the middle');
+    });
+
+    for (const emptyish of ['', '  \n ', undefined, null, 42, {}, ['x'], true]) {
+      it(`${name} with the body ${JSON.stringify(emptyish) ?? String(emptyish)} stores no body key at all`, async () => {
+        const h = await setup([]);
+        const id = make(h.store, emptyish);
+        assert.equal(has(h.row(id), 'body'), false);
+      });
+    }
+  }
+
+  it('addTask with only an empty body leaves the row without updatedAt (task rows keep their shape)', async () => {
+    const h = await setup([]);
+    const id = h.store.addTask('plain task', '   ');
+    assert.equal(has(h.row(id), 'updatedAt'), false);
+  });
+
+  it('a body stored by addTask is identical to what setBody would keep, so setting it again is a no-op', async () => {
+    const h = await setup([]);
+    const id = h.store.addTask('t', 'line one   \n');
+    h.reset();
+    assertNoOp(h, () => h.store.setBody(id, 'line one'), 'setBody with the value already stored');
+  });
+
+  for (const bad of [undefined, null, 42, {}, ['x'], true]) {
+    it(`setText(${JSON.stringify(bad) ?? String(bad)}) is ignored: a non-string never becomes a title`, async () => {
+      const h = await setup([dump()]);
+      assertNoOp(h, () => h.store.setText('a', bad), 'setText with a non-string');
+    });
+  }
+
+  it('setLinkTitle with the title the item already has is a true no-op (no save, no new edit time)', async () => {
+    const url = 'https://example.com/a';
+    const h = await setup([dump({ text: url, linkTitle: 'Example', updatedAt: EARLIER })]);
+    assertNoOp(h, () => h.store.setLinkTitle('a', url, 'Example'), 'the same title again');
+    assert.equal(h.row().updatedAt, EARLIER);
+  });
+
+  it('setLinkTitle compares the trimmed title, so padding around the same title is also a no-op', async () => {
+    const url = 'https://example.com/a';
+    const h = await setup([dump({ text: url, linkTitle: 'Example' })]);
+    assertNoOp(h, () => h.store.setLinkTitle('a', url, '  Example  '), 'the same title, padded');
+  });
+
+  it('setLinkTitle still replaces a different title', async () => {
+    const url = 'https://example.com/a';
+    const h = await setup([dump({ text: url, linkTitle: 'Old title' })]);
+    assertCommittedOnce(h, () => h.store.setLinkTitle('a', url, 'New title'));
+    assert.equal(h.row().linkTitle, 'New title');
+  });
+
+  it('unfileNote clears a stray tag a damaged file left on a note: it comes back untagged, as promised', async () => {
+    const h = await setup([note({ quad: 3 })]);
+    h.store.unfileNote('a');
+    assert.equal(h.row().status, 'dump');
+    assert.equal(h.row().quad, null);
+  });
+});

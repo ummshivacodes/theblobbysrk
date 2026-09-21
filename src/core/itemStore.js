@@ -13,11 +13,18 @@
 // passes its render function.
 //
 // Every transition is guarded: an impossible move (closing a thread that is in the dump, filing a
-// task that is already on the axis) does nothing: no change, no save, no redraw.
+// task that is already on the axis) does nothing: no change, no save, no redraw. Input is normalised
+// here, not trusted from the caller (see cleanText / cleanBody).
 import { toHistory } from './history.js';
 import { migrate } from './migrate.js';
 
 const CLOSE_BEAT_MS = 700; // how long a thread shows "crossed off" before it counts as done
+
+// The store owns the shape of its data, whoever is calling. A title is a trimmed string and never
+// blank; a body is a string with its trailing whitespace trimmed, and an empty body is simply no body.
+// Anything that isn't a string counts as empty (it must never be stored as "42" or "[object Object]").
+const cleanText = (text) => (typeof text === 'string' ? text.trim() : '');
+const cleanBody = (body) => (typeof body === 'string' ? body.replace(/\s+$/, '') : '');
 
 export function createItemStore(persistence, onChange) {
   const state = { version: 2, threads: [], stats: { listed: 0, done: 0 }, history: [] };
@@ -53,12 +60,15 @@ export function createItemStore(persistence, onChange) {
 
   // Capture first, tag after. A new task is untagged (quad null) and sits in the list. Returns the new
   // id so the UI can flag its row as freshly added (scroll-into-view + highlight): that is
-  // presentation, so it is not part of this state.
+  // presentation, so it is not part of this state. A blank title captures nothing and returns null.
   function addTask(text, body) {
+    const title = cleanText(text);
+    if (!title) return null;
     const id = newId();
-    const item = { id, text, quad: null, status: 'dump', createdAt: Date.now() };
-    if (body) {
-      item.body = body;
+    const item = { id, text: title, quad: null, status: 'dump', createdAt: Date.now() };
+    const notes = cleanBody(body);
+    if (notes) {
+      item.body = notes;
       item.updatedAt = item.createdAt;
     }
     state.threads.push(item);
@@ -67,12 +77,16 @@ export function createItemStore(persistence, onChange) {
     return id;
   }
 
-  // A note goes straight to the notes shelf. It is not a task, so it does not count as "listed".
+  // A note goes straight to the notes shelf. It is not a task, so it does not count as "listed". Like
+  // addTask, a blank title captures nothing and returns null.
   function addNote(text, body) {
+    const title = cleanText(text);
+    if (!title) return null;
     const id = newId();
     const now = Date.now();
-    const item = { id, text, quad: null, status: 'note', createdAt: now, updatedAt: now };
-    if (body) item.body = body;
+    const item = { id, text: title, quad: null, status: 'note', createdAt: now, updatedAt: now };
+    const notes = cleanBody(body);
+    if (notes) item.body = notes;
     state.threads.push(item);
     commit();
     return id;
@@ -154,6 +168,7 @@ export function createItemStore(persistence, onChange) {
     const t = find(id);
     if (!t || t.status !== 'note') return;
     t.status = 'dump';
+    t.quad = null; // untagged, whatever a damaged file may have left on the note
     t.updatedAt = Date.now();
     state.stats.listed++;
     commit();
@@ -164,7 +179,7 @@ export function createItemStore(persistence, onChange) {
   function setBody(id, body) {
     const t = find(id);
     if (!t || t.status === 'resolving') return;
-    const next = String(body ?? '').replace(/\s+$/, '');
+    const next = cleanBody(body);
     if (next === (t.body ?? '')) return;
     if (next) t.body = next;
     else delete t.body;
@@ -177,7 +192,7 @@ export function createItemStore(persistence, onChange) {
   function setText(id, text) {
     const t = find(id);
     if (!t || t.status === 'resolving' || t.status === 'done') return;
-    const next = String(text ?? '').trim();
+    const next = cleanText(text);
     if (!next || next === t.text) return;
     t.text = next;
     delete t.linkTitle;
@@ -189,8 +204,8 @@ export function createItemStore(persistence, onChange) {
   // exactly that URL: the fetch is slow and the item may have been edited or replaced meanwhile.
   function setLinkTitle(id, url, title) {
     const t = find(id);
-    const clean = typeof title === 'string' ? title.trim() : '';
-    if (!t || !clean || t.text.trim() !== url) return;
+    const clean = cleanText(title);
+    if (!t || !clean || t.text.trim() !== url || clean === t.linkTitle) return;
     t.linkTitle = clean;
     t.updatedAt = Date.now();
     commit();

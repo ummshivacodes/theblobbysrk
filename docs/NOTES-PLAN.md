@@ -136,7 +136,7 @@ Item = {
   status: 'dump' | 'axis' | 'resolving' | 'done' | 'note',   // 'note' is new
   quad: 1 | 2 | 3 | 4 | null,                                 // always null for a note
   body?: string,          // new; any item
-  updatedAt?: number,     // new; set by every mutation (sorts notes now; makes sync possible later)
+  updatedAt?: number,     // new; the last CONTENT edit (see the updatedAt policy below); sorts the Notes screen
   linkTitle?: string,     // new; fetched page title when `text` is a bare URL
   doneAt?, focused?       // unchanged
 }
@@ -145,17 +145,30 @@ Item = {
 note can't be half-task. Migration v1→v2 only stamps `version: 2`: every new field is optional, so
 existing data needs no rewrite. The key stays `threads` (file-format stability beats a nicer name).
 
+**Input rules (the store owns the shape of its data, whoever calls it).** A title is stored trimmed and can
+never be blank; a body is stored with its tail trimmed, and an empty body means no `body` key; anything that
+is not a string counts as empty (it must never be stored as `"42"` or `"[object Object]"`). `addTask` and
+`addNote` return the new id, or `null` when there was nothing to capture. `unfileNote` clears any stray `quad`.
+
+**`updatedAt` policy, and what it costs.** It is stamped by content edits only: `addNote`, `addTask` (when a
+body is given), `fileAsNote`, `unfileNote`, `setBody`, `setText`, `setLinkTitle`. It is deliberately **not**
+stamped by the task lifecycle (`tagTask`, `dispatchToAxis`, `recallToDump`, `resolveThread`, `reopenTask`,
+`toggleFocus`), so a task row's on-disk shape stays what the Phase 0 UI test pins. The cost: a future sync
+merge cannot see *status* changes on tasks. When sync is built it must extend the stamp to every mutation
+deliberately, and update that UI-test check in the same commit (and backfill on load, since old rows have none).
+(Earlier drafts of this plan said "set by every mutation"; that was dropped for the reason above.)
+
 New transitions (each guarded like the existing ones; an impossible move is a no-op):
 
 | Function | Allowed from | Effect |
 |---|---|---|
-| `addNote(text, body?)` | – | new item, `status:'note'`; does **not** bump `stats.listed` |
+| `addNote(text, body?)` | – | new item, `status:'note'`, `createdAt` = `updatedAt` = now; does **not** bump `stats.listed`; blank title → returns `null`, a true no-op |
 | `fileAsNote(id)` | `dump` | → `note`, `quad = null`, `stats.listed--` (floor 0): it was never a task |
 | `unfileNote(id)` | `note` | → `dump`, untagged, `stats.listed++` |
-| `setBody(id, body)` | any but `resolving` | trims the end; deletes the key when empty |
-| `setText(id, text)` | any but `resolving`/`done` | ignores empty |
-| `setLinkTitle(id, url, title)` | any | only if `text.trim() === url` still holds |
-| `addTask(text, body?)` | – | gains the optional body |
+| `setBody(id, body)` | any but `resolving` | trims the end (keeps the start); empty or non-string → deletes the key; saving what is already stored is a no-op |
+| `setText(id, text)` | any but `resolving`/`done` | trimmed; blank, non-string or unchanged is ignored; drops `linkTitle` (it described the old text) |
+| `setLinkTitle(id, url, title)` | any | only if `text.trim() === url` still holds; blank/non-string ignored; the same title again is a no-op |
+| `addTask(text, body?)` | – | gains the optional body (`updatedAt` only when a body is given); blank title → returns `null` |
 
 Tightened while we're here (found by porting the store tests; each gets a test):
 - `tagTask` also no-ops on `note`; `dispatchToAxis` also requires a quad (today only the UI enforces that);
@@ -296,7 +309,7 @@ change), before the visible features start, and before the final swap (Phase 5 r
 |---|---|---|
 | Markdown mirror (`~/Notes/Blob/*.md`, an Obsidian vault for free) | new `main/noteExport.js`, called from the save handler in `main/ipc.js` | it only reads saved data |
 | `#tags` and `[[links]]` → brain map | new `core/tags.js` parsing note **bodies**, plus a selector | they live in the text: no schema change |
-| Sync (iCloud / Supabase) | swap `bridge.persistence` | the store only knows the injected interface; `updatedAt` is already there for merging |
+| Sync (iCloud / Supabase) | swap `bridge.persistence` | the store only knows the injected interface. `updatedAt` exists for content edits; extending it to every mutation is part of the sync work (see the policy under section 4) |
 | Phone app | reuse `src/core/` unchanged, tests included | core has no DOM and no Electron, and the architecture test keeps it that way |
 | Axis bar colours / label overlap (open since 2026-09-19) | `views/axisView.js` alone | one view, one file |
 
@@ -338,7 +351,8 @@ Kept current so a new session (or a different model) can pick up exactly where t
 - **Lane D merged**: the architecture test (12 rules, `test/unit/lib/architecture.mjs` + `.test.mjs`), written from the plan without reading the code it checks. Its tokenizer was cross-validated against Node's bundled `acorn` over 3,495 real files before being trusted.
 - **Phases 0–2 complete and merged. `PHASE = { renderer: true, main: true }`** — the architecture test now actually runs its renderer- and main-gated rules against the real tree, not just the meta-tests. It found one real thing: `main/links.js` had a local variable named `window` (its lookback buffer for a `</head>` scan) — not a DOM leak, but a name that invites the question; renamed to `scanBuf`. 660 unit tests, both Electron gates, and `verify:packaged` (the packed `.asar`) all green.
 - **Phase 3 (notes in the store) already complete** (see above) — done ahead of the original sequencing since it doesn't depend on lane B.
-- **Lane F running**: independent spec-based tests for the note store, written from the plan alone before reading `itemStore.js`, as a second pair of eyes on Phase 3.
+- **Lane F merged** (its first attempt stalled before writing anything; retried as two smaller agents, F and G). F wrote 148 tests for the note operations from the spec before reading the code and found one real bug: `setBody` stored non-strings as text (`42` → `"42"`). Fixed, along with the same class of gap it found by probing: blank/non-string titles, un-normalised bodies on creation, a repeated link title re-saving, `unfileNote` keeping a stray tag. All pinned by 50 new tests, each mutation-checked (4 deliberate breaks, all caught). F also surfaced the `updatedAt` spec conflict, now resolved in section 4.
+- **Lane G running**: the integrity half (ids, delete, load/save round trip, a seeded-random invariant test).
 
 **Checkpoint reached: Phases 0–2 (and 3) are merged, green, including the packaged build. Nothing user-visible has changed — Phase 4 (the notes UI) is next and is the first phase that does.**
 
