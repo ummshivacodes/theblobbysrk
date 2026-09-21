@@ -157,8 +157,18 @@ New transitions (each guarded like the existing ones; an impossible move is a no
 | `setLinkTitle(id, url, title)` | any | only if `text.trim() === url` still holds |
 | `addTask(text, body?)` | – | gains the optional body |
 
-Tightened while we're here: `tagTask` also no-ops on `note`; `dispatchToAxis` also requires a quad
-(today only the UI enforces that); `deleteTask` is renamed `deleteItem`.
+Tightened while we're here (found by porting the store tests; each gets a test):
+- `tagTask` also no-ops on `note`; `dispatchToAxis` also requires a quad (today only the UI enforces that);
+  `deleteTask` is renamed `deleteItem` and no longer saves or re-renders for an unknown id.
+- `resolveThread` only acts on `axis`. Today a second call inside the 700 ms window, or a call on a done
+  thread, counts the point twice (`stats.done` +2, two history entries).
+- Deleting an item cancels its pending resolve (the store tracks the timer per id). Today a deleted thread
+  still "completes": `stats.done` goes up, a history entry appears, a save happens.
+- `loadState` runs `migrate` first, then reverts any `resolving` thread to `axis`. Today quitting inside the
+  700 ms window (any other mutation saves the transient state) reloads a thread stuck as `resolving`
+  forever. Reverting is safe and consistent: the score and history only change when the 700 ms finishes,
+  so nothing had been counted.
+- New ids can't collide (a counter or random suffix on top of the timestamp).
 "Done 11/20" stays a task ratio: notes never count as listed.
 
 ## 5. UI spec
@@ -305,7 +315,7 @@ Each has a natural home; none blocks the notes work.
 | Issue | Found by | Fix belongs in |
 |---|---|---|
 | **Hide → show within milliseconds leaves the panel "open" but hidden.** `win.hide()` flips `isVisible()` at once but Electron's `hide` event reaches the page slightly later, so a mashed hotkey can reorder "collapse" and "open". A human takes seconds, so normal use is fine. | Phase 0 UI test (it failed twice, differently, until it waited for the page to process the hide) | `main/window.js` (send the events with a sequence number) or `ui/panel.js` (ignore a stale collapse) |
-| **`resolveThread` has no status guard** (only the UI's call sites gate it). Every other transition is guarded. | The store test port | Phase 3, with the other tightening (`tagTask` on notes, `dispatchToAxis` needing a quad) |
+| **`resolveThread` has no status guard** (only the UI's call sites gate it), so a double call counts the point twice; **deleting a thread mid-resolve** still completes it; **quitting mid-resolve** reloads it stuck as `resolving` forever; `loadState` trusts the file (stats without `done` become NaN after one completion). | The store test port (lane E reproduced each in memory) | Phase 3: see the list under section 4 |
 | **Axis bars render as thin white lines** instead of the intended coloured pins: the `raise`/`groove` SVG filters use the default objectBoundingBox on zero-width/height lines, so the coloured bar is clipped to nothing. Fix is `filterUnits="userSpaceOnUse"` with explicit regions. Owner hasn't decided (thick bars are busier). | Screenshots on 2026-09-19 | `views/axisView.js`, on the owner's say-so |
 | **Axis labels overlap** once about five threads are open (the axis is a fixed 300 units wide). Idea: label only the hovered/focused bar. | Same | `views/axisView.js` |
 | **Ids can collide** if two items are created in the same millisecond (`Date.now().toString(36)`). Unreachable by typing; matters if a paste ever creates several items at once. | Reading `itemStore.addTask` while porting | `core/itemStore.js`: add a counter or random suffix, with a test |

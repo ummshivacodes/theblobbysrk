@@ -123,11 +123,14 @@ Rules that keep it rebuildable:
 ```
 npm test
 ```
-Runs `test/taskStore.test.js`: plain Node, no Electron, about a second (one
-case waits out the 700 ms close animation). It drives the state machine
-against a fake in-memory persistence object and also guards the rules above
-(no DOM in the store, no global-name collisions with `renderer.js`). Change a
-transition, change its test.
+Plain-Node unit tests (`test/unit/*.test.mjs`, on `node:test`): no Electron, no
+window, well under a second. They cover the item state machine against a fake
+in-memory persistence object (every transition and its no-op cases; the 700 ms
+close animation runs on mock timers), the pure logic in `src/core/` (selectors,
+capture, link detection, data migration), the main-process helpers in `main/`
+(safe saving with backups, link fetching), and the small UI helpers that need no
+DOM (snapshot freezing, hover, timestamp formatting). Change a transition,
+change its test.
 
 ```
 npm run test:ui

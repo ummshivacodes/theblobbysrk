@@ -57,7 +57,7 @@ describe('toHistory', () => {
     assert.deepEqual(toHistory(frozen), { id: 'k1', text: 'x', quad: 3, createdAt: 1, doneAt: 2 });
   });
 
-  it('is identical to the toHistory it was extracted from (taskStore.js)', () => {
+  it('is identical to the store\'s original inline toHistory', () => {
     const original = ({ id, text, quad, createdAt, doneAt }) => ({ id, text, quad, createdAt, doneAt });
     const samples = [
       { id: 'a', text: 't', quad: 1, createdAt: 1, doneAt: 2 },

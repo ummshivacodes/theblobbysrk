@@ -8,10 +8,10 @@
 //
 // persistence = { loadThreads, saveThreads }. onChange is invoked after every mutation; the app
 // passes its render function.
+import { toHistory } from './history.js';
+
 export function createItemStore(persistence, onChange) {
   const state = { threads: [], stats: { listed: 0, done: 0 }, history: [] };
-
-  const toHistory = ({ id, text, quad, createdAt, doneAt }) => ({ id, text, quad, createdAt, doneAt });
 
   async function loadState() {
     const saved = await persistence.loadThreads();
