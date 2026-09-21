@@ -297,3 +297,16 @@ editor type-checking is wanted), a CSS reorganisation, a second hotkey.
 
 `N` for the note dot · `✎` for the Notes button · `⌘↵` = capture as note · filed notes leave the
 main list · link-title fetching on · one JSON file (revisit if it passes ~5 MB).
+
+## 10. Known issues found along the way (not fixed in Phases 0–2, which change no behaviour)
+
+Each has a natural home; none blocks the notes work.
+
+| Issue | Found by | Fix belongs in |
+|---|---|---|
+| **Hide → show within milliseconds leaves the panel "open" but hidden.** `win.hide()` flips `isVisible()` at once but Electron's `hide` event reaches the page slightly later, so a mashed hotkey can reorder "collapse" and "open". A human takes seconds, so normal use is fine. | Phase 0 UI test (it failed twice, differently, until it waited for the page to process the hide) | `main/window.js` (send the events with a sequence number) or `ui/panel.js` (ignore a stale collapse) |
+| **`resolveThread` has no status guard** (only the UI's call sites gate it). Every other transition is guarded. | The store test port | Phase 3, with the other tightening (`tagTask` on notes, `dispatchToAxis` needing a quad) |
+| **Axis bars render as thin white lines** instead of the intended coloured pins: the `raise`/`groove` SVG filters use the default objectBoundingBox on zero-width/height lines, so the coloured bar is clipped to nothing. Fix is `filterUnits="userSpaceOnUse"` with explicit regions. Owner hasn't decided (thick bars are busier). | Screenshots on 2026-09-19 | `views/axisView.js`, on the owner's say-so |
+| **Axis labels overlap** once about five threads are open (the axis is a fixed 300 units wide). Idea: label only the hovered/focused bar. | Same | `views/axisView.js` |
+| **Ids can collide** if two items are created in the same millisecond (`Date.now().toString(36)`). Unreachable by typing; matters if a paste ever creates several items at once. | Reading `itemStore.addTask` while porting | `core/itemStore.js`: add a counter or random suffix, with a test |
+| **`Esc` with the right-click menu open also collapses the panel** (both handlers fire). | Writing the UI test (deliberately not asserted) | `ui/app.js` |

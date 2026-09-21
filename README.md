@@ -79,27 +79,39 @@ npm start
 Change the hotkey by editing `HOTKEY` at the top of `main.js`.
 
 ## Architecture
-Three layers, dependencies pointing one way (view → store):
+Layers, with dependencies pointing one way. ES modules, no bundler and no build
+step: `index.html` loads one entry point, `src/ui/app.js`.
 
-| File | Role | Knows about |
+| Where | Role | May import |
 |---|---|---|
-| `taskStore.js` | The task state machine: `threads`/`stats`/`history` and every transition (`addTask`, `tagTask`, `dispatchToAxis`, `recallToDump`, `resolveThread`, `reopenTask`, `deleteTask`, `toggleFocus`). | Nothing. No DOM, no Electron: persistence and a change callback are injected. |
-| `renderer.js` | The view: draws the blob, axis, list and gear screen from `store.state`; panel animation, window sizing, DOM wiring. | `taskStore.js` and the `window.threadAxis` bridge. |
-| `preload.js` | The only bridge between the page and Electron (IPC). | Electron. |
-| `main.js` | The OS shell: window, tray, hotkey, reading/writing `threads.json`, the debug/self-test hooks. | Electron, Node. |
+| `src/core/` | Pure logic. Today: the item state machine (`itemStore.js`: `addTask`, `tagTask`, `dispatchToAxis`, `recallToDump`, `resolveThread`, `reopenTask`, `deleteTask`, `toggleFocus`). No DOM, no Electron, no I/O: persistence and the change callback are injected. It runs in plain Node, which is where it is tested, and a phone app could reuse it unchanged. | only other `src/core/` files |
+| `src/ui/views/` | One file per thing on screen: `orbView`, `axisView`, `inboxView`, `scoreView`, `doneView`, plus `itemRow` (one row). A view is `createXView(elements, actions)` returning `{ render(snapshot, ui), applyHover?(id) }`. It draws from a **frozen snapshot** and reports what the user did through `actions`. It can't reach the store or the bridge. | `ui/dom`, `ui/theme`, `ui/format`, `core/selectors` |
+| `src/ui/` | The page's machinery, one job per file: `bridge` (the only file that reads `window.threadAxis`), `snapshot`, `hover`, `panel` (fold-out animation + window sizing), `screens`, `tooltip`, `rowMenu`, `dom`, `format`, `theme`. | each other, sparingly |
+| `src/ui/app.js` | The composition root. Looks up the page's elements (the only file that knows the ids in `index.html`), creates the store and the views, and hands each only the elements and actions it needs. | everything in `src/` |
+| `preload.js` | The only bridge between the page and Electron (IPC). | Electron |
+| `main.js` | The OS shell: window, tray, hotkey, reading/writing `threads.json`. | Electron, Node |
 
 Rules that keep it rebuildable:
-- **Transitions live in `taskStore.js` only.** It guards each one, so an
-  impossible move (say, closing a thread that's in the dump) is a no-op.
-  The UI never sets `t.status` itself; it calls `store.*` and re-renders.
-- **One top-level name in `taskStore.js`.** `index.html` loads it and
-  `renderer.js` as classic scripts, which share a single global scope. A
-  second top-level `const COLORS` would stop `renderer.js` loading at all
-  ("Identifier … has already been declared"). Anything else goes inside
-  the `createTaskStore` factory.
-- **New source files must be listed in `build.files` in `package.json`.**
-  Otherwise the packaged app ships without them while `npm start` keeps
-  working, which is a nasty one to find.
+- **Transitions live in `src/core/itemStore.js` only.** It guards each one, so
+  an impossible move (say, closing a thread that's in the dump) is a no-op.
+  The UI never sets `t.status` itself; it asks through an action and redraws.
+- **Views can read state but structurally cannot change it.** `app.js` renders
+  from `takeSnapshot(store.state)`, a deep-frozen copy, and ES modules are
+  strict, so a stray write throws instead of silently corrupting data. UI-only
+  state (which row is being retagged, what is hovered) lives in the UI and is
+  never written onto the data.
+- **One door for each outside thing.** `window.threadAxis` only in
+  `ui/bridge.js`; the ids of `index.html` only in `ui/app.js`. Hover sync works
+  by each view repainting its own elements (`applyHover`), never by one view
+  reaching into another's DOM.
+- **Nothing parses markup:** `innerHTML` is only ever assigned `''` (to clear).
+  Text goes through `textContent`, SVG through `svgEl`.
+- **A bar outlives the snapshot it was drawn from,** so click handlers on
+  long-lived elements look the item up in the *latest* snapshot rather than
+  trusting the one they were created with.
+- **New source files must be covered by `build.files` in `package.json`**
+  (`src/**` and `main/**` already are). Otherwise the packaged app ships
+  without them while `npm start` keeps working, which is a nasty one to find.
 - **`main.js` never trusts its window.** Every call goes through
   `liveWindow()` (a destroyed window throws on every method), closing hides
   (⌘W is in Electron's default menu), only a real quit lets it close, and a
