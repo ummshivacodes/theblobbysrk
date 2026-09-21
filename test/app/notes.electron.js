@@ -106,7 +106,8 @@ function pageDriver() {
   }));
   // Every row helper works on the task list by default, or on another list ('#noteList') when told to.
   // A row is found by its text, or by its id (a row for a link reads as the page's title, not as its text).
-  const rowEl = (key, list = '#taskList') => $$(`${list} .task-row`).find((r) => r.dataset.id === key || $('.task-text', r).textContent === key) || null;
+  // (An omitted `list` reaches the page as null, because arguments travel as JSON: `||`, not a default value.)
+  const rowEl = (key, list) => $$(`${list || '#taskList'} .task-row`).find((r) => r.dataset.id === key || $('.task-text', r).textContent === key) || null;
   const row = (text, list) => need(rowEl(text, list), `row "${text}" in ${list || '#taskList'}`);
   const inRow = (text, sel, list) => need($(sel, row(text, list)), `${sel} in row "${text}"`);
 
@@ -131,6 +132,7 @@ function pageDriver() {
       chip: $('.tag-chip', r) ? $('.tag-chip', r).textContent : null,
       titleLinks: $$('.task-text .link', r).map((a) => ({ text: a.textContent, title: a.title })),
       domain: $('.link-domain', r) ? $('.link-domain', r).textContent : null,
+      rename: $('.title-edit', r) ? { value: $('.title-edit', r).value, focused: document.activeElement === $('.title-edit', r) } : null,
       tip: $('.task-text', r).title,
       bodyLinks: $$('.body-read .link', r).map((a) => ({ text: a.textContent, title: a.title })),
       snippet: $('.note-snippet', r) ? $('.note-snippet', r).textContent : null,
@@ -170,8 +172,32 @@ function pageDriver() {
   }
 
   let marked = null; // a node the test wants to recognise again later
-  window.__notes = {
+  // What the page saw lately (mouse, keys, visibility, the panel folding), for a check that needs explaining: a
+  // panel that folded when nothing asked it to is only explainable if you can see what happened around it.
+  const seen = [];
+  const t0 = performance.now();
+  const note = (what) => { seen.push(`${Math.round(performance.now() - t0)}ms ${what}`); if (seen.length > 40) seen.shift(); };
+  ['mouseenter', 'mouseleave', 'keydown', 'pointerdown', 'visibilitychange'].forEach((type) => document.addEventListener(type, (e) => {
+    note(`${type}${e.isTrusted ? '' : '*'}${e.key ? ` ${e.key}` : ''}${e.target && e.target.id ? ` #${e.target.id}` : ''} vis=${document.visibilityState}`);
+  }, true));
+  new MutationObserver(() => note(`panel class="${$('#panel').className}" display=${$('#panel').style.display}`))
+    .observe($('#panel'), { attributes: true, attributeFilter: ['class', 'style'] });
+
+  // The test owns hovering, as it owns the window's show/hide: only its own (synthetic) mouseenter/mouseleave
+  // reach the app. A real one (the operating system reporting the pointer in or out of a window that is meant to
+  // ignore it) would fold the panel at a random moment. Any that arrive are ignored, and counted so the run can
+  // say so. (This runs before the app's own listeners: capture phase, on the document.)
+  const strayHovers = [];
+  ['mouseenter', 'mouseleave'].forEach((type) => document.addEventListener(type, (e) => {
+    if (!e.isTrusted) return;
+    strayHovers.push(`${Math.round(performance.now() - t0)}ms ${type} ${e.target === document ? 'document' : `${e.target.tagName.toLowerCase()}${e.target.id ? `#${e.target.id}` : ''}`}`);
+    e.stopImmediatePropagation();
+  }, true));
+
+  const actions = {
     snapshot,
+    seen: () => seen.slice(-14).join(' | '),
+    strayHovers: () => strayHovers,
     hoverShell: (on) => { fire($('#shell'), on ? 'mouseenter' : 'mouseleave'); return snapshot(); },
     rowClick: (text, sel, list) => { inRow(text, sel, list).click(); return snapshot(); },
     expander: (text, list) => { inRow(text, '.row-expander', list).click(); return snapshot(); },
@@ -221,6 +247,19 @@ function pageDriver() {
       linkIn(text, where, index, list).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
       return snapshot();
     },
+    // Renaming: double-click a title (or a link in one), type into the box that appears, press a key in it.
+    dblclick: (key, list) => { fire(inRow(key, '.task-text', list), 'dblclick'); return snapshot(); },
+    dblclickLink: (key, where, index, list) => { fire(linkIn(key, where, index, list), 'dblclick'); return snapshot(); },
+    renameType: (key, value, list) => {
+      const box = inRow(key, '.title-edit', list);
+      box.value = value;
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+      return snapshot();
+    },
+    renameKey: (key, k, init = {}, list) => {
+      inRow(key, '.title-edit', list).dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...init }));
+      return snapshot();
+    },
     dotClick: (text, n) => { $$('.tag-dot', row(text))[n - 1].click(); return snapshot(); },
     mark: (text, list) => { marked = inRow(text, '.body-edit', list); return true; },
     isMarked: (text, list) => { const area = $('.body-edit', row(text, list)); return !!area && area === marked; },
@@ -238,6 +277,12 @@ function pageDriver() {
     },
     click: (sel) => { need($(sel), sel).click(); return snapshot(); },
   };
+
+  // A page-side error has to reach the test WITH its message: Electron's own "Script failed to execute" says
+  // neither what failed nor why, and finding out used to cost a rerun. (act() below names the action.)
+  window.__notes = Object.fromEntries(Object.entries(actions).map(([name, fn]) => [name, (...args) => {
+    try { return fn(...args); } catch (e) { return { __error: e.message }; }
+  }]));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -246,19 +291,47 @@ function pageDriver() {
 let win;
 let last = null;
 
-const act = (name, ...args) => win.webContents.executeJavaScript(
-  `window.__notes[${JSON.stringify(name)}](...${JSON.stringify(args)})`);
+const act = async (name, ...args) => {
+  const result = await win.webContents.executeJavaScript(
+    `window.__notes[${JSON.stringify(name)}](...${JSON.stringify(args)})`);
+  if (result && result.__error) throw new Error(`${name}(${args.map((a) => JSON.stringify(a)).join(', ')}): ${result.__error}`);
+  return result;
+};
 
+// Poll snapshots until `pred` holds. Resolves to that snapshot, or null on timeout; if the polling itself kept
+// failing (a row that isn't there, say) the last error is kept so the timeout can say so.
+let lastPollError = null;
 async function until(pred, ms = 5000) {
-  const ok = await waitFor(async () => { last = await act('snapshot'); return pred(last); }, ms);
+  const ok = await waitFor(async () => {
+    try {
+      last = await act('snapshot');
+      return pred(last);
+    } catch (e) {
+      lastPollError = e.message;
+      throw e; // waitFor treats a throw as "not yet"
+    }
+  }, ms);
+  if (ok) lastPollError = null;
   return ok ? last : null;
 }
 const brief = (s) => s && JSON.stringify({
-  panelOpen: s.panelOpen, hasFocus: s.hasFocus, active: s.active,
+  panelOpen: s.panelOpen, panelDisplay: s.panelDisplay, panelSettled: s.panelSettled, hasFocus: s.hasFocus, active: s.active,
   rows: s.rows.map((r) => `${r.text} [${r.cls.join(',')}] body=${r.body ? `${r.body.mode}:${JSON.stringify(r.body.value)}` : '-'} ${r.acts.join('')}`),
 });
-const why = (s) => (s ? '' : `timed out; last seen ${brief(last)}`);
+const why = (s) => (s ? '' : `timed out; last seen ${brief(last)}${lastPollError ? `; last error: ${lastPollError}` : ''}`);
 const rowOf = (s, key) => s.rows.find((r) => r.id === key || r.text === key);
+
+// Every section starts from an open panel. If something has folded it when nothing asked it to, say so here,
+// at the first place it is noticed (with what the page saw), instead of as a cascade of unrelated failures
+// further on; then open it again so the rest of the run still tells us something.
+async function panelStillOpen(where) {
+  const s = await act('snapshot');
+  if (s.panelOpen && s.panelDisplay === 'block') return true;
+  check(`(setup) the panel is still open before ${where}`, false, `${brief(s)}; the page saw: ${await act('seen')}`);
+  await act('hoverShell', true);
+  await until((x) => x.panelOpen && x.panelDisplay === 'block' && x.panelSettled);
+  return false;
+}
 
 const disk = () => ctx.readData();
 const diskItem = (d, id) => d.threads.find((t) => t.id === id);
@@ -431,6 +504,7 @@ app.whenReady().then(async () => {
     && rowOf(s, 'plain task').body.value === 'thinking about, then hidden', why(s));
 
   // ---- 4b: filing a note, ⌘↵, and pasting several lines -----------------------------------------------------------------------------
+  await panelStillOpen('4b');
   s = await act('snapshot');
   check('the capture box says what ⌘↵ does', s.capture.placeholder === 'dump a task or a thought…   ⌘↵ = note');
   check('it is a multi-line box (a one-line input would flatten pasted line breaks)', s.capture.tag === 'TEXTAREA');
@@ -490,6 +564,7 @@ app.whenReady().then(async () => {
   s = await act('capture', '', {}); // leave the box empty
 
   // ---- 4c: the Notes screen ---------------------------------------------------------------------------------------------------------------
+  await panelStillOpen('4c');
   const noteOf = (snap, key) => snap.notes.find((r) => r.id === key || r.text === key);
   const titles = (snap) => snap.notes.map((r) => r.text);
   const noteOnDisk = (d, text) => d.threads.find((t) => t.text === text);
@@ -601,6 +676,7 @@ app.whenReady().then(async () => {
   check('(setup) back on the main screen for what follows', !!s, why(s));
 
   // ---- 4d: links ---------------------------------------------------------------------------------------------------------------------------
+  await panelStillOpen('4d');
   // Pre-flight: prove the stub catches an open request all the way from the page, BEFORE any link is clicked.
   await win.webContents.executeJavaScript(`window.threadAxis.openExternal('https://example.invalid/blob-test-preflight')`);
   if (!check('(setup) opening a link cannot reach the real browser: the request is caught by the test',
@@ -662,6 +738,7 @@ app.whenReady().then(async () => {
   check('nothing else was opened along the way', opened.length === 6, JSON.stringify(opened));
 
   // ---- 4e: titles for captured links --------------------------------------------------------------------------------------------------------
+  await panelStillOpen('4e');
   // (Everything from here that reads a page goes through the fake network at the top; the 4d setup proved it.)
   fetched.length = 0;
   opened.length = 0;
@@ -728,6 +805,7 @@ app.whenReady().then(async () => {
   const slowId = await idOf('https://example.com/slow');
   s = await until((x) => rowOf(x, slowId) && rowOf(x, slowId).titleLinks[0]);
   check('until a title arrives the row shows the tidied address', !!s && rowOf(s, slowId).titleLinks[0].text === 'example.com/slow', why(s));
+  await panelStillOpen('the title-arrives-while-typing check');
   await act('expander', slowId);
   s = await until((x) => rowOf(x, slowId).body && rowOf(x, slowId).body.focused);
   check('(setup) the caret is in that row\'s notes', !!s, why(s));
@@ -758,6 +836,7 @@ app.whenReady().then(async () => {
   check('(setup) back on the main screen', !!s, why(s));
 
   // ---- a failed save is never silent ---------------------------------------------------------------------------------------------------
+  await panelStillOpen('a failed save is never silent');
   const onDiskByText = (text) => disk().threads.find((t) => t.text === text);
   // (Electron prints the refused 'save-threads' handler, an EACCES, to stderr while this runs: expected.)
   fs.chmodSync(ctx.tmp, 0o500); // the data folder stops accepting writes: what a full or locked disk looks like
@@ -775,6 +854,104 @@ app.whenReady().then(async () => {
     await untilDisk((d) => !!d.threads.find((t) => t.text === 'written while the disk refuses') && !!d.threads.find((t) => t.text === 'written after the disk is back')));
   s = await until((x) => x.notice.hidden);
   check('…and the notice goes away by itself', !!s, why(s));
+
+  // ---- 4f: renaming a title --------------------------------------------------------------------------------------------------------------
+  await panelStillOpen('4f');
+  const itemOnDisk = (id) => disk().threads.find((t) => t.id === id);
+  const startRename = async (id, list) => {
+    await act('dblclick', id, list);
+    return until((x) => (list ? x.notes : x.rows).find((r) => r.id === id).rename && (list ? x.notes : x.rows).find((r) => r.id === id).rename.focused);
+  };
+  const listedBeforeRenames = disk().stats.listed;
+
+  s = await startRename('later2');
+  check('double-clicking a title turns it into a text box with the caret in it, holding the title as stored',
+    !!s && rowOf(s, 'later2').rename.value === 'later task B', why(s));
+  await act('renameType', 'later2', 'renamed task B');
+  await act('renameKey', 'later2', 'Enter');
+  s = await until((x) => rowOf(x, 'later2').text === 'renamed task B');
+  check('Enter saves the new title and the row reads it (the box is gone)', !!s && rowOf(s, 'later2').rename === null, why(s));
+  check('…on disk, with the edit time, and the task counter untouched', await untilDisk((d) => {
+    const t = d.threads.find((x) => x.id === 'later2');
+    return t.text === 'renamed task B' && typeof t.updatedAt === 'number' && d.stats.listed === listedBeforeRenames;
+  }));
+
+  await startRename('later3');
+  await act('renameType', 'later3', 'discard me');
+  await act('renameKey', 'later3', 'Escape');
+  s = await until((x) => rowOf(x, 'later3').rename === null);
+  check('Esc leaves the title as it was, and does not fold the panel', !!s && rowOf(s, 'later3').text === 'later task C' && s.panelOpen, why(s));
+  check('…nothing was saved', itemOnDisk('later3').text === 'later task C');
+
+  await startRename('later3');
+  await act('renameType', 'later3', 'saved by leaving');
+  await act('blurActive');
+  s = await until((x) => rowOf(x, 'later3').text === 'saved by leaving');
+  check('clicking away saves it too', !!s && await untilDisk((d) => d.threads.find((x) => x.id === 'later3').text === 'saved by leaving'), why(s));
+
+  await startRename('later3');
+  await act('renameType', 'later3', '   ');
+  await act('renameKey', 'later3', 'Enter');
+  s = await until((x) => rowOf(x, 'later3').rename === null);
+  check('a blank title is ignored: it keeps what it had', !!s && rowOf(s, 'later3').text === 'saved by leaving' && itemOnDisk('later3').text === 'saved by leaving');
+
+  const stamp = itemOnDisk('later2').updatedAt;
+  await startRename('later2');
+  await act('renameKey', 'later2', 'Enter'); // pressed with no change
+  s = await until((x) => rowOf(x, 'later2').rename === null);
+  check('pressing Enter without changing anything saves nothing (the edit time stays)', !!s && !(await waitFor(() => itemOnDisk('later2').updatedAt !== stamp, 400)));
+
+  // Renaming to a link asks for its page title, like a capture does.
+  const fetchesOfArticle = () => fetched.filter((f) => f === article).length;
+  const fetchesBefore = fetchesOfArticle();
+  await startRename('later3');
+  await act('renameType', 'later3', article);
+  await act('renameKey', 'later3', 'Enter');
+  s = await until((x) => rowOf(x, 'later3').titleLinks[0] && rowOf(x, 'later3').titleLinks[0].text === 'An Article Worth Reading & Saving');
+  check('renaming a title to a link fetches the page\'s title, and the row reads as it', !!s && fetchesOfArticle() === fetchesBefore + 1, why(s));
+
+  // Editing a link shows the address you can change, not the page title it reads as; changing it drops the title.
+  s = await startRename('later3');
+  check('renaming a link row starts from the address, not from the page title', !!s && rowOf(s, 'later3').rename.value === article, why(s));
+  await act('renameType', 'later3', 'plain again');
+  await act('renameKey', 'later3', 'Enter');
+  s = await until((x) => rowOf(x, 'later3').text === 'plain again');
+  check('…and a title that is no longer that link loses the page title it had', !!s && await untilDisk((d) => {
+    const t = d.threads.find((x) => x.id === 'later3');
+    return t.text === 'plain again' && !('linkTitle' in t);
+  }), why(s));
+
+  s = await act('dblclickLink', linkRow, 'title', 0);
+  check('double-clicking a link inside a title does not rename it', rowOf(s, linkRow).rename === null);
+
+  // Mid-rename the panel does not fold (typing counts, as everywhere).
+  await startRename('later2');
+  await act('hoverShell', false);
+  await sleep(500);
+  s = await act('snapshot');
+  check('moving the mouse away while renaming does not fold the panel', s.panelOpen && s.panelDisplay === 'block', brief(s));
+  await act('blurActive');
+  s = await until((x) => !x.panelOpen && x.panelDisplay === 'none');
+  check('…it folds when you stop', !!s, why(s));
+  await act('hoverShell', true);
+  s = await until((x) => x.panelOpen && x.panelDisplay === 'block' && x.panelSettled);
+  check('(setup) the panel is open again', !!s, why(s));
+
+  // On the Notes screen.
+  await act('click', '#notesBtn');
+  await until((x) => x.screen === 'notes');
+  await act('noteCapture', 'a note to rename');
+  await untilDisk((d) => !!noteOnDisk(d, 'a note to rename'));
+  const renameNoteId = noteOnDisk(disk(), 'a note to rename').id;
+  s = await startRename(renameNoteId, '#noteList');
+  check('a note\'s title is renamed the same way', !!s, why(s));
+  await act('renameType', renameNoteId, 'a renamed note', '#noteList');
+  await act('renameKey', renameNoteId, 'Enter', {}, '#noteList');
+  s = await until((x) => noteOf(x, renameNoteId) && noteOf(x, renameNoteId).text === 'a renamed note');
+  check('…and it reads as the new title there', !!s && await untilDisk((d) => itemOnDisk(renameNoteId).text === 'a renamed note'), why(s));
+  await act('pageKey', 'Escape');
+  s = await until((x) => x.screen === 'main');
+  check('(setup) back on the main screen', !!s, why(s));
 
   // ---- a real press on a button while an editor has focus ---------------------------------------------------------------------
   // Typing a note, then clicking ✓ on the row below it, must work with ONE click. If the press pulled focus
@@ -832,6 +1009,8 @@ app.whenReady().then(async () => {
   check('every saved item has only known fields (no UI state such as "expanded" leaks in)', d.threads.every((t) =>
     Object.keys(t).every((k) => ['id', 'text', 'quad', 'status', 'createdAt', 'updatedAt', 'doneAt', 'focused', 'body', 'linkTitle'].includes(k))));
 
+  const stray = await act('strayHovers');
+  if (stray.length) console.log(`note: ${stray.length} real mouseenter/mouseleave event(s) reached the sealed window and were ignored: ${stray.join(' | ')}`);
   finish();
 }).catch((e) => {
   check('notes UI test run aborted', false, e.message);

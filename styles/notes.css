@@ -132,3 +132,10 @@
   background: transparent; color: inherit; font-size: 14px; line-height: 16px; cursor: pointer; opacity: 0.7;
 }
 .notice-close:hover { opacity: 1; background: rgba(255, 255, 255, 0.1); }
+
+/* ---------- Renaming a title (double-click) ---------- */
+.task-text .title-edit {
+  display: block; width: 100%; padding: 1px 4px; border-radius: 4px; outline: none;
+  border: 1px solid var(--note); background: rgba(255, 255, 255, 0.08);
+  color: #fff; font: inherit;
+}

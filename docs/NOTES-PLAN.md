@@ -89,6 +89,7 @@ src/
       notesView.js         notes screen
       itemRow.js           shared row: expander, title, chip/dots, actions
       bodyEditor.js        read (links clickable) ↔ edit (textarea)
+      titleEditor.js       rename a title in place (double-click); renamedTo() and createRename() are pure and unit-tested
       notesBadgeView.js    the header's N button: the count, and a pulse when it goes up
 styles/notes.css
 test/unit/*.test.mjs       plain Node: core + main/lib + main/persistence + architecture rules
@@ -101,7 +102,10 @@ scripts/shot.electron.js   screenshot helper (replaces the SHOT hook inside main
 
 ```
 src/core/*      → src/core/* only. Never mentions window, document, require(, electron.
-src/ui/views/*  → ui/dom, ui/theme, ui/format, views/itemRow, views/bodyEditor, core/selectors, core/linkify.
+src/ui/views/*  → ui/dom, ui/theme, ui/format, views/itemRow, views/bodyEditor, views/titleEditor, core/selectors, core/linkify.
+                  (titleEditor was added to the allow-list with the rename feature, on purpose: like bodyEditor it is
+                  one more editor a row uses and is handed everything it needs. The rule keeps views away from the
+                  store and the bridge; it is not there to freeze the list of view files.)
                   NEVER core/itemStore, NEVER ui/bridge. Views are handed what they need.
 src/ui/bridge   → the only file containing "window.threadAxis".
 src/ui/app      → may import anything in src/. The only place things are wired together.
@@ -246,6 +250,12 @@ the plan never stated them, so the code was the only spec):
   composition root: a body editor has focus, or the capture box has text in it. A box that merely has focus does
   not count (it gets focus after Esc from ⚙ and after the hotkey, and would pin the panel open). A panel opened by
   the hotkey and never left by the mouse stays open when the window loses focus, as it always did.
+- **Rename:** double-click a title (not a link inside it; not a task that is done or closing) and it becomes a text
+  box holding the title as stored: a link row reads as its page title, but the address is what you edit. Enter or
+  clicking away saves, Esc leaves it as it was (a title is a few words, so the usual "Esc cancels" is safe here,
+  unlike in a note). It counts as typing everywhere the notes editor does (the redraw is held, the panel doesn't
+  fold), through the same `data-editor` marker and the same `blob:edit-ended` event. A rename that makes the title a
+  bare link asks for its page title like a capture does; one that makes it words drops the old one (`setText`).
 - **Links:** `linkify` → segments → DOM nodes. Never `innerHTML`. Click → `actions.openLink(href)` →
   bridge → main, which validates again (`safeUrl`: http/https only) before `shell.openExternal`.
   The overlay window itself can never navigate: `setWindowOpenHandler(() => ({action:'deny'}))` and
@@ -469,11 +479,21 @@ Kept current so a new session (or a different model) can pick up exactly where t
   memory and re-saves everything on the next change). An unknown notice kind from a newer main process is ignored.
   The notes test boots from a garbage live file with a good backup and makes the data folder read-only to prove both.
 
+- **Phase 4f done** (see `git log`): rename a title by double-clicking it (`views/titleEditor.js`, 11 unit tests, and the
+  architecture rule's allow-list extended for it, see section 3). The notes test covers Enter, Esc, blur, blank, an
+  unchanged title (no edit-time bump), renaming into and out of a link, a double-click on a link (no rename), the panel
+  not folding mid-rename, and the Notes screen. **Phase 4 is complete.** 1,082 unit tests; the notes test has about 170
+  checks.
+
 **Lessons for whoever writes the next Electron test** (learned the hard way: about 150 test launches, most of them
 chasing flakes that were the machine, not the code)
 1. **Seal the window at creation** (`app.on('browser-window-created')`: `setFocusable(false)`, `setIgnoreMouseEvents(true)`).
    Otherwise a real click or keystroke from the person at the machine lands in it mid-test (seen: a stray "e" typed into a
-   note, a real pointer-down closing an editor). Doing it after the page loads is too late.
+   note, a real pointer-down closing an editor). Doing it after the page loads is too late. **It is not enough for hover:**
+   real `mouseenter`/`mouseleave` events still reach a window that ignores the mouse (a whole pointer-arrival cascade, 32
+   events in one run), and a stray `mouseleave` folds the panel 300 ms later. The test owns hovering too: a capture-phase
+   listener on the document swallows every *trusted* enter/leave (its own are synthetic and pass), counts them and says so
+   at the end of the run.
 2. **Own the lifecycle events.** macOS emits `hide` (with `isVisible()` still true) when something merely covers the window,
    and reports the first `show` late. The page reacts by folding the panel or stealing focus, at random moments. Swallow
    `window-shown` / `window-hidden` in the test (wrap `webContents.send`) and send them explicitly.
@@ -490,6 +510,11 @@ chasing flakes that were the machine, not the code)
    `net.fetch` at call time, so replacing them on the `electron` module object in the test is enough; then push one request
    through the real page → main chain to an `.invalid` address and stop the test if it wasn't caught. No test may open the
    owner's browser or reach the network.
-8. **Don't loop.** Run each Electron test once, twice at most. A failure that changes from run to run is the environment: get
+8. **Make failures say where and why, and check the starting state.** A page-side exception reaches Electron as "Script
+   failed to execute", which names nothing, and finding the step used to cost a rerun. Wrap the driver's actions so an
+   exception comes back as data, and have the test's `act()` rethrow it with the action, its arguments and the real message.
+   And start each section with a cheap tripwire (`panelStillOpen`: is the panel open?) that reports, once, with what the
+   page saw lately, at the first place a fold is noticed, instead of a cascade of unrelated failures further on.
+9. **Don't loop.** Run each Electron test once, twice at most. A failure that changes from run to run is the environment: get
    one trace (log `focus()`/`blur()` call stacks, textarea removals, main-process show/hide events), find the cause, fix it
    once, and stop. Each run puts a window on the owner's screen.

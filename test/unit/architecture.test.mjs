@@ -300,6 +300,8 @@ const BASE_FILES = {
   'src/ui/views/itemRow.js': lines(`import { el } from '../dom.js';`, `export const itemRow = () => el('div');`),
   'src/ui/views/bodyEditor.js': lines(`import { el } from '../dom.js';`, `import { linkify } from '../../core/linkify.js';`,
     'export const bodyEditor = (text) => [el(\'div\'), linkify(text)];'),
+  'src/ui/views/titleEditor.js': lines(`import { el } from '../dom.js';`, `import { EDIT_ENDED } from './bodyEditor.js';`,
+    'export const titleEditor = () => [el(\'input\'), EDIT_ENDED];'),
   'src/ui/views/orbView.js': lines(`import { el } from '../dom.js';`, `import { COLORS } from '../theme.js';`,
     'export const createOrbView = (root, actions) => ({',
     `  render() { root.textContent = ''; root.append(el('div')); void COLORS; void actions; },`, '});'),
@@ -437,10 +439,10 @@ describe('R2 views-isolation (renderer)', () => {
     expectConforming('R2', {
       [view]: lines(
         `import { el } from '../dom.js';`, `import { COLORS } from '../theme.js';`, `import { fmtWhen } from '../format.js';`,
-        `import { itemRow } from './itemRow.js';`, `import { bodyEditor } from './bodyEditor.js';`,
+        `import { itemRow } from './itemRow.js';`, `import { bodyEditor } from './bodyEditor.js';`, `import { titleEditor } from './titleEditor.js';`,
         `import { activeThreads } from '../../core/selectors.js';`, `import { linkify } from '../../core/linkify.js';`,
         `import { itemRow as again } from '../views/itemRow.js';`, `import { el as el2 } from '../../ui/dom.js';`,
-        'export const v = [el, COLORS, fmtWhen, itemRow, bodyEditor, activeThreads, linkify, again, el2];',
+        'export const v = [el, COLORS, fmtWhen, itemRow, bodyEditor, titleEditor, activeThreads, linkify, again, el2];',
       ),
     });
   });

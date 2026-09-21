@@ -25,11 +25,12 @@ export const SAVE_IDLE_MS = 800;
 // textarea out DURING blur, so focusout is then fired at a node that is no longer in the page.
 export const EDIT_ENDED = 'blob:edit-ended';
 
-// Is the user typing in a body editor somewhere inside `container`? A list uses this to tell the
-// composition root "don't redraw me right now".
+// Is the user typing in an editor (a body, or a title being renamed) somewhere inside `container`? A list
+// uses this to tell the composition root "don't redraw me right now". Every editor marks its text box with
+// data-editor, so this needn't know what kinds there are.
 export function isEditingIn(container) {
   const active = document.activeElement;
-  return !!active && active.tagName === 'TEXTAREA' && container.contains(active);
+  return !!active && active.dataset && active.dataset.editor !== undefined && container.contains(active);
 }
 
 // Which items have their body open, for one list. Opening the body of an item that has none takes the
@@ -123,6 +124,7 @@ export function createBodyEditor({ item, readOnly = false, autofocus = false }, 
     const area = el('textarea', {
       className: 'body-edit',
       attrs: { placeholder: 'Add notes…', rows: 3 },
+      dataset: { editor: 'body' },
     });
     area.value = draft;
     area.addEventListener('input', () => {

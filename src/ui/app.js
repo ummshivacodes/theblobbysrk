@@ -77,6 +77,11 @@ const actions = {
   setBody: (id, body) => store.setBody(id, body),
   fileNote: (id) => store.fileAsNote(id),
   unfile: (id) => store.unfileNote(id),
+  // A rename that made the title a link asks for that page's title too (as a capture does).
+  rename: (id, text) => {
+    store.setText(id, text);
+    linkTitles.request(id, text);
+  },
   // Fire and forget: the main process checks the address and hands it to the browser.
   openLink: (href) => { Promise.resolve(bridge.links.openExternal(href)).catch(() => {}); },
   remove: (id) => {
@@ -104,11 +109,11 @@ const orb = createOrbView({ bar: $('orbBar') }, pick(actions, ['showTooltip', 'h
 const axis = createAxisView({ svg: $('axisSvg'), count: $('axisCount') }, pick(actions, ['resolve', 'hover']));
 const inbox = createInboxView(
   { list: $('taskList'), count: $('taskCount') },
-  pick(actions, ['tag', 'push', 'recall', 'resolve', 'reopen', 'focus', 'remove', 'setBody', 'fileNote', 'openLink', 'hover', 'openMenu']),
+  pick(actions, ['tag', 'push', 'recall', 'resolve', 'reopen', 'focus', 'remove', 'setBody', 'fileNote', 'openLink', 'rename', 'hover', 'openMenu']),
 );
 const notes = createNotesView(
   { search: $('notesSearch'), list: $('noteList'), count: $('noteCount') },
-  pick(actions, ['unfile', 'remove', 'setBody', 'openLink', 'openMenu']),
+  pick(actions, ['unfile', 'remove', 'setBody', 'openLink', 'rename', 'openMenu']),
 );
 const notesBadge = createNotesBadgeView({ button: $('notesBtn'), count: $('notesCount') });
 

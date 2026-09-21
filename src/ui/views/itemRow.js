@@ -4,12 +4,14 @@ import { el, renderSegments } from '../dom.js';
 import { firstLine, fmtAgo } from '../format.js';
 import { COLORS } from '../theme.js';
 import { createBodyEditor } from './bodyEditor.js';
+import { createTitleEditor } from './titleEditor.js';
 
 // One row of a list: an expander, the title, a tag control, and the action button(s) that fit the item's
 // status; expanded, the item's body sits under it. Pure construction: it never touches the store, and
 // every interaction goes out through `handlers`:
 //   { tag(id, q), startRetag(id), push(id), recall(id), resolve(id), reopen(id), focus(id),
-//     hover(id | null), menu(x, y, item), toggleExpand(id), saveBody(id, body), fileNote(id), unfile(id), openLink(href) }
+//     hover(id | null), menu(x, y, item), toggleExpand(id), saveBody(id, body), fileNote(id), unfile(id), openLink(href),
+//     startRename(id), endRename(), rename(id, text) }
 
 // A round action button; clicking it must not also count as a click on the row.
 function actionButton(className, text, title, run) {
@@ -107,8 +109,8 @@ function noteMeta(item, expanded) {
   return meta;
 }
 
-// opts = { retagging: boolean, fresh: boolean, expanded: boolean, autofocusBody: boolean, handlers }
-export function buildRow(item, { retagging, fresh, expanded = false, autofocusBody = false, handlers }) {
+// opts = { retagging: boolean, fresh: boolean, expanded: boolean, autofocusBody: boolean, renaming: boolean, handlers }
+export function buildRow(item, { retagging, fresh, expanded = false, autofocusBody = false, renaming = false, handlers }) {
   const row = el('div', { className: 'task-row', dataset: { id: item.id } });
   if (item.focused) row.classList.add('focused');
   if (item.status === 'resolving') row.classList.add('resolving');
@@ -126,19 +128,30 @@ export function buildRow(item, { retagging, fresh, expanded = false, autofocusBo
     className: 'task-text',
     title: item.status === 'axis' ? 'Click to focus this thread' : item.text,
   });
-  // A title that is just a link reads as the page's title (or the shortened address) with the site beside it, and
-  // opens the link; any other title is shown as written, with whatever links it holds clickable.
-  const shown = displayTitle(item);
-  if (shown.kind === 'link') {
-    renderSegments(text, [{ type: 'link', value: shown.label, href: shown.href }], { onLink: handlers.openLink });
-    if (shown.domain) text.appendChild(el('span', { className: 'link-domain', text: shown.domain }));
+  if (renaming) {
+    // Being renamed: a text box holding the title as stored. (Clicks inside it are not clicks on the title.)
+    text.appendChild(createTitleEditor({ item }, { rename: handlers.rename, end: handlers.endRename }));
   } else {
-    renderSegments(text, linkify(shown.label), { onLink: handlers.openLink });
+    // A title that is just a link reads as the page's title (or the shortened address) with the site beside it,
+    // and opens the link; any other title is shown as written, with whatever links it holds clickable.
+    const shown = displayTitle(item);
+    if (shown.kind === 'link') {
+      renderSegments(text, [{ type: 'link', value: shown.label, href: shown.href }], { onLink: handlers.openLink });
+      if (shown.domain) text.appendChild(el('span', { className: 'link-domain', text: shown.domain }));
+    } else {
+      renderSegments(text, linkify(shown.label), { onLink: handlers.openLink });
+    }
+    text.onclick = () => {
+      if (item.status === 'axis') handlers.focus(item.id);
+      else if (item.status === 'note') handlers.toggleExpand(item.id); // a note's title opens it
+    };
+    // Double-click renames, except on a link (that is two clicks on the link) and on a task that is being or
+    // has been crossed off (the store won't rename those).
+    text.ondblclick = (e) => {
+      if (e.target.closest('.link') || item.status === 'done' || item.status === 'resolving') return;
+      handlers.startRename(item.id);
+    };
   }
-  text.onclick = () => {
-    if (item.status === 'axis') handlers.focus(item.id);
-    else if (item.status === 'note') handlers.toggleExpand(item.id); // a note's title opens it
-  };
   row.appendChild(text);
   // Rows still in the dump have no bar or core to light up, and neither has a note.
   if (item.status !== 'dump' && item.status !== 'note') {
