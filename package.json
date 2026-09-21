@@ -7,9 +7,12 @@
     "start": "electron .",
     "test": "node test/taskStore.test.js",
     "test:unit": "node --test \"test/unit/**/*.test.mjs\"",
-    "test:app": "electron test/lifecycle.electron.js",
+    "test:app": "electron test/app/lifecycle.electron.js",
+    "test:ui": "electron test/app/ui.electron.js",
     "build": "electron-builder --mac --dir",
-    "install-app": "npm run build && rm -rf /Applications/Blob.app && cp -R dist/mac-arm64/Blob.app /Applications/Blob.app && echo 'Installed /Applications/Blob.app'"
+    "install-app": "npm run build && rm -rf /Applications/Blob.app && cp -R dist/mac-arm64/Blob.app /Applications/Blob.app && echo 'Installed /Applications/Blob.app'",
+    "verify": "npm test && npm run test:unit && npm run test:app && npm run test:ui",
+    "verify:packaged": "sh scripts/verify-packaged.sh"
   },
   "build": {
     "appId": "com.shiva.blob",

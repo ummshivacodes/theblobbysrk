@@ -118,37 +118,53 @@ against a fake in-memory persistence object and also guards the rules above
 transition, change its test.
 
 ```
+npm run test:ui
+```
+The safety net for the UI. It boots the real main process on fixture data and
+drives the real DOM like a user would (capture, tag, push, recall, close,
+reopen, focus, hover, right-click, the crossed-off screen, Esc, hide/show,
+quit), checking both what is on screen and what lands in `threads.json`. It
+knows nothing about renderer internals, only the DOM contract (ids, classes,
+text) and the file, so it must stay **unchanged** through any refactor: if a
+check has to change for a refactor to pass, the refactor changed behaviour.
+Same requirements as `test:app` below.
+
+```
 npm run test:app
 ```
 The Electron-level check for `main.js`. It boots the real main process, then
 does the things that can strand an overlay app (⌘W, a destroyed window, a
 killed renderer, a renderer that dies on every load) and checks that Blob
 recovers and still quits. It needs a GUI session and briefly shows a Blob
-window, a tray icon and a Dock icon (~20 s), so don't type while it runs. It
-uses fixture data and its own profile, never your `threads.json`, so it is
-safe to run while Blob is open.
+window, a tray icon and a Dock icon (~20 s), so don't type while it runs. Both
+Electron tests use fixture data and their own profile (see
+`scripts/lib/isolatedApp.js`), never your `threads.json`, so they are safe to
+run while Blob is open.
+
+```
+npm run verify            # everything: unit + test:app + test:ui
+npm run verify:packaged   # test:app + test:ui against the code inside the BUILT app.asar
+```
+`verify:packaged` (after `npm run build`) is what catches a file missing from
+the package while `npm start` still works: run it before every install.
 
 ## Debugging
 - `THREAD_AXIS_DEBUG=1 npm start` logs every window resize and forwards
   renderer console output to the terminal.
-- `THREAD_AXIS_SELFTEST=1 npm start` drives expand → add → push to axis →
-  recall → close → gear screen → reopen → delete from the main process so the whole flow can be
-  checked without a mouse. It cleans up after itself.
-- `THREAD_AXIS_SHOT=out.png [THREAD_AXIS_EVAL="js"] npm start` runs some
-  JS in the renderer (default `openPanel()`), captures the window to a PNG
-  and quits. E.g. `THREAD_AXIS_EVAL="openPanel(); setTimeout(() => showScreen('done'), 300)"`.
-- Those need the installed Blob quit first: it holds the single-instance
-  lock, so a plain `npm start` just reveals it and exits silently. They
-  also run against your real `threads.json`.
-- **Isolated run** (no need to quit Blob, and your real tasks are never
-  touched): point the app at a scratch copy of the data and give it its own
-  profile, which gives it its own single-instance lock:
+- **Screenshots:** `npx electron scripts/shot.electron.js out.png ["js to run in the page"]`
+  boots the app on sample data, runs the JS (default: hover the blob so the
+  panel unfolds), writes a PNG and quits. To see your own tasks, point
+  `BLOB_SHOT_DATA` at a **copy** of `threads.json`; it is only ever written to a
+  temp dir. Blob can keep running.
+- **Never** run `npm start` to poke at the app while the installed Blob is up: it shares
+  the installed app's single-instance lock (so it just reveals the running one) and
+  writes your real `threads.json`. Use the tools above, or run isolated by hand:
   ```
   cp ~/Library/Application\ Support/thread-axis/threads.json /tmp/blob-test.json
-  THREAD_AXIS_DATA=/tmp/blob-test.json THREAD_AXIS_SELFTEST=1 npx electron . --user-data-dir=/tmp/blob-test-profile
+  THREAD_AXIS_DATA=/tmp/blob-test.json npx electron . --user-data-dir=/tmp/blob-test-profile
   ```
-  The same two settings work on the packaged app
-  (`Blob.app/Contents/MacOS/Blob --user-data-dir=…`).
+  (`THREAD_AXIS_DATA` moves the data file; `--user-data-dir` gives the run its own
+  single-instance lock. A fake `$HOME` does not work on macOS.)
 
 ## macOS "malware" dialog
 Electron's prebuilt binary is only ad-hoc signed. If macOS ever shows

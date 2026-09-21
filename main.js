@@ -74,7 +74,7 @@ function createWindow() {
   // Dock icon. We want the Dock icon; the tray + hotkey cover full-screen.
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
   // Absolute, so it doesn't depend on which script Electron was launched with
-  // (the lifecycle test launches test/lifecycle.electron.js and requires this file).
+  // (the Electron tests launch their own script under test/app/ and require this file).
   win.loadFile(path.join(__dirname, 'index.html'));
 
   if (DEBUG) {
@@ -83,40 +83,6 @@ function createWindow() {
     win.webContents.on('did-finish-load', () => console.log('[main] did-finish-load', win.getBounds()));
     win.webContents.on('preload-error', (e, p, err) => console.log('[preload-error]', p, err));
     win.webContents.on('render-process-gone', (e, d) => console.log('[render-process-gone]', d));
-  }
-
-  // THREAD_AXIS_SELFTEST=1: drive expand → add task → collapse from here so the
-  // sizing path can be checked from a terminal without a mouse.
-  if (process.env.THREAD_AXIS_SELFTEST === '1') {
-    const run = (js) => win.webContents.executeJavaScript(js).catch((e) => console.log('[selftest error]', e.message));
-    const log = (tag) => console.log(`[selftest] ${tag}`, win.getBounds());
-    win.webContents.once('did-finish-load', () => {
-      setTimeout(() => { log('collapsed'); run('window.__statsBefore = JSON.stringify(state.stats); openPanel()'); }, 800);
-      setTimeout(() => { log('expanded'); run("store.addTask('selftest thread'); store.tagTask(state.threads.at(-1).id, 1); store.dispatchToAxis(state.threads.at(-1).id); store.toggleFocus(state.threads.at(-1).id)"); }, 1600);
-      setTimeout(() => { run("(() => { const id = 'selftest-recall'; state.threads.push({id, text: 'recall check', quad: 2, status: 'dump', createdAt: Date.now()}); store.dispatchToAxis(id); const onAxis = state.threads.find(x => x.id === id).status; store.recallToDump(id); const backInDump = state.threads.find(x => x.id === id).status; store.deleteTask(id); console.log('[selftest-status] push/recall:', onAxis, '->', backInDump); })()"); }, 1700);
-      setTimeout(() => { log('expanded+task'); run("store.resolveThread(state.threads.at(-1).id)"); }, 2400);
-      setTimeout(() => { run("console.log('[selftest-status] after resolve:', state.threads.at(-1).status, '| bars in svg:', document.querySelectorAll('#axisSvg g.bar-g').length, '| done rows:', document.querySelectorAll('.task-row.done').length, '| undo btns:', document.querySelectorAll('.task-act.undo').length, '| history:', state.history.length, '| done stat:', state.stats.done)"); }, 3400);
-      setTimeout(() => { run("showScreen('done'); console.log('[selftest-status] gear screen:', document.getElementById('doneScreen').classList.contains('active'), '| history rows:', document.querySelectorAll('#doneList .task-row').length, '| big:', document.getElementById('doneBig').textContent)"); }, 3500);
-      setTimeout(() => { run("showScreen('main'); store.reopenTask(state.threads.at(-1).id); console.log('[selftest-status] after reopen:', state.threads.at(-1).status, '| strike lines:', document.querySelectorAll('#axisSvg g.bar-g .strike').length, '| history:', state.history.length, '| done stat:', state.stats.done, '| main screen:', document.getElementById('mainScreen').classList.contains('active'))"); }, 3600);
-      setTimeout(() => { run("store.resolveThread(state.threads.at(-1).id)"); }, 3650);
-      setTimeout(() => { run("store.deleteTask(state.threads.at(-1).id); state.stats = JSON.parse(window.__statsBefore); state.history = state.history.filter(h => h.text !== 'selftest thread'); store.persist(); render(); console.log('[selftest-status] after delete: threads', state.threads.length, '| bars', document.querySelectorAll('#axisSvg g.bar-g').length)"); run('closePanel()'); }, 4500);
-      setTimeout(() => { log('collapsed, cleaned'); app.quit(); }, 5200);
-    });
-  }
-
-  // THREAD_AXIS_SHOT=/path.png [THREAD_AXIS_EVAL="js"]: run some JS in the
-  // renderer, capture the window to a PNG, quit. For eyeballing a screen
-  // from a terminal without touching the mouse.
-  if (process.env.THREAD_AXIS_SHOT) {
-    win.webContents.once('did-finish-load', () => {
-      setTimeout(() => win.webContents.executeJavaScript(process.env.THREAD_AXIS_EVAL || 'openPanel()').catch((e) => console.log('[shot eval error]', e.message)), 600);
-      setTimeout(async () => {
-        const img = await win.webContents.capturePage();
-        fs.writeFileSync(process.env.THREAD_AXIS_SHOT, img.toPNG());
-        console.log('[shot] wrote', process.env.THREAD_AXIS_SHOT, win.getBounds());
-        app.quit();
-      }, 1600);
-    });
   }
 
   // Let the renderer know when the hotkey revealed / hid it so it can
