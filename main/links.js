@@ -35,9 +35,10 @@ async function readHead(response, maxBytes) {
       bytes += chunk.length;
       const piece = decoder.decode(chunk, { stream: true });
       text += piece;
-      const window = (tail + piece).toLowerCase();
-      if (window.includes(END_OF_HEAD)) break;
-      tail = window.slice(-(END_OF_HEAD.length - 1));
+      // Named scanBuf, not "window": main/ has no DOM, and that name would invite the question.
+      const scanBuf = (tail + piece).toLowerCase();
+      if (scanBuf.includes(END_OF_HEAD)) break;
+      tail = scanBuf.slice(-(END_OF_HEAD.length - 1));
     }
     return text + decoder.decode();
   } finally {
