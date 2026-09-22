@@ -56,11 +56,14 @@ Item = {
   inbox; newest-edited-first for notes). So loading an old file changes nothing anyone sees until they actually
   drag something — the same "a phase that touches the schema changes no behaviour" discipline the notes plan
   used for its own Phases 0–2.
-  - This needs the exact grouping/sort rules `selectors.js` already has (`isNote`, `byCreatedAsc`,
-    `newestEditFirst`), and `migrate.js` must not reimplement them a second time — that's the two-places-one-
-    rule cross wire the standing rule exists to catch. **New tiny core file, `src/core/naturalOrder.js`**,
-    exports `isNote`, `byCreatedAsc`, `newestEditFirst`; `selectors.js` is refactored to import them instead of
-    keeping its own private copies (a no-behaviour-change refactor, its own commit, gated by the existing
+  - This needs the exact grouping/sort rules `selectors.js` already has (`isNote`, `newestEditFirst`), and
+    `migrate.js` must not reimplement them a second time — that's the two-places-one-rule cross wire the
+    standing rule exists to catch. **New tiny core file, `src/core/naturalOrder.js`**, exports `isNote`,
+    `newestEditFirst` (not `byCreatedAsc` too, as an earlier draft of this line said: only the notes-only scope
+    needs backfilling right now, so `byCreatedAsc` — used only by `inboxItems`, which this plan never touches —
+    stays private to `selectors.js`; a reviewer audit checked this deliberately, not just noted the mismatch).
+    `selectors.js` is refactored to import the two it needs instead of keeping its own private copies of THOSE
+    (a no-behaviour-change refactor, its own commit, gated by the existing
     selectors tests staying green with zero changes); `migrate.js` imports the same ones for the backfill.
 - **A new note gets the position a fresh note always had: the top.** Corrected during implementation — the
   plan's first draft said "the end of the group", copying the INBOX list's convention (new task = bottom, since
@@ -153,8 +156,11 @@ styles/notes.css (or a        the handle, the lifted-row look, the placeholder �
   new styles/reorder.css)     file-per-feature convention as notes.css itself
 index.html                   the credit line, in the ⚙ screen, after the "Toggle Blob ⌘⇧Y" row:
                               <div class="credit">Blob — made by SRK</div>
-test/unit/naturalOrder.test.mjs, an extended itemStore.test.mjs (reorderItems), an extended migrate test
-  (backfill), an extended selectors test (sorts by order once present)
+An extended itemStore.test.mjs (reorderItems), an extended migrate test (the backfill), an extended
+  selectors test (sorts by order once present) — as built, isNote/newestEditFirst's behaviour is exercised
+  thoroughly through those two (ties, non-finite order, the fallback), not through a dedicated
+  naturalOrder.test.mjs of its own; nothing is untested, just no separate file for it (a reviewer audit
+  checked this deliberately: every case the plan wanted covered has an assertion, just not filed here)
 test/app/reorder.electron.js  NEW (own file, so ui.electron.js and notes.electron.js both stay exactly as they
                               are). npm run test:reorder; verify and verify:packaged grow to include it, same
                               as test:notes was threaded in for Phase 4.
@@ -218,13 +224,31 @@ it is not a thing (only `app.js` constructs and wires it, exactly like the rende
   into `verify`/`verify:packaged`. Building the test surfaced a real, general testing gotcha, now in
   `docs/NOTES-PLAN.md` §11 point 10 (a `getBoundingClientRect()` read racing Chromium's own layout pass right after
   something else changed the DOM) — not a bug in the app, but worth any future test knowing about.
-- **Not done, deliberately: the "rename can repaint from a stale snapshot" question from the Phase 5 review.** The
-  SAME class of local-`redraw()`-bypasses-the-gate mechanism exists here too (`toggleExpand`/`startRename`/
-  `endRename` in `notesView.js`), but a real single-pointer drag cannot coincide with a click on a DIFFERENT row's
-  button (the mouse is captured by the drag handle) the way the earlier finding's scenario needed two clicks in
-  quick succession — so this is even less reachable than that one, and was not chased for the same reason: fixing
-  it needs a real scenario to test against, and none exists here.
-- **Not merged into `main` yet.** `npm run verify` is green (1,108 unit tests; all four Electron suites). Whoever
-  merges this should run the same read-only reviewer-agent audit Phase 5 used before merging Phase 4, since nobody
-  has looked at this tree with fresh eyes yet.
+- **The "rename can repaint from a stale snapshot" question from the Phase 5 review — chased after all, and fixed.**
+  The first draft of this section said a real single-pointer drag can't coincide with a click on a different row
+  (true, but not the whole story) and called this "even less reachable" than the original finding — **wrong**, and
+  a reviewer audit (2026-09-22) caught it by tracing the actual code, not by re-running the reasoning: `dragList.js`'s
+  keydown handler only intercepts `Escape`, so an **Enter** key press — one hand on the mouse dragging, the other on
+  the keyboard ending an *already-open* rename on a different row, an entirely ordinary two-handed action — reaches
+  `titleEditor.js`'s own handler unimpeded, blurs, and calls `notesView.js`'s `endRename` → the same ungated local
+  `redraw()` → `list.innerHTML = ''`, wiping the container the drag is actively moving a row inside of. Confirmed
+  reachable, not speculative, so fixed rather than logged:
+  - `dragList.js` exports `DRAG_ENDED` and fires it (bubbling, on `container`) whenever a drag finishes — committed,
+    cancelled, or force-cancelled — after `.dragging` is already removed. It also gained `cancel()`: end a drag right
+    now, no commit, same as Esc.
+  - `notesView.js`'s `redraw()` (used by `toggleExpand`/`startRename`/`endRename`, and now the search box's own input
+    handler too, which had the identical exposure — typing in an already-focused search box while dragging is just as
+    ordinary) skips the actual repaint while any row in the list is `.dragging`, remembering to. `flushIfPending()`,
+    called by `app.js` on `DRAG_ENDED`, catches up the moment it's safe. No new import into the view: it's a DOM class
+    check, the same shape as `isEditingIn`, not a dependency on `dragList.js`.
+  - The audit also flagged, lower confidence (code alone couldn't confirm it): the global hotkey hides the window
+    regardless of focus, hits the identical blur-triggered path, and — if Electron doesn't fire `pointercancel` on
+    hide on its own — could leave `noteDrag.isDragging()` stuck true forever, freezing the render gate. Rather than
+    find out empirically, `app.js`'s `onHidden` now calls `noteDrag.cancel()` before collapsing, unconditionally: the
+    render gate can never depend on unverified browser behaviour for its own liveness.
+  - Two new `test/app/reorder.electron.js` sections: the Enter-ends-a-different-rename-mid-drag race (checks the drag
+    is undisturbed — still marked dragging — at the moment of the collision, and that both changes land correctly
+    once it resolves), and hiding the window mid-drag (checks the drag is cancelled, not stuck, and that a fresh drag
+    afterwards still works — nothing about the gate stayed "held").
+- **Not merged into `main` yet.** `npm run verify` green throughout (1,108 unit tests; all four Electron suites).
 

@@ -12,6 +12,10 @@ import { createRename } from './titleEditor.js';
 // It owns the UI state that must not live on the data: the search text and which notes are open.
 // Dragging is turned off while a search is showing (see render): reordering a filtered subset doesn't
 // have a clear meaning, since most of the group isn't even on screen to drag past.
+//
+// None of that UI-only state goes through the render gate (it never touches the store), but it still
+// must not repaint the list out from under an active drag — see redraw()/flushIfPending() — so app.js
+// calls flushIfPending() once it hears the Notes list's drag has ended.
 //   els = { search, list, count }
 //   actions = { unfile, remove, setBody, openLink, rename, openMenu(x, y, entries) }
 const clip = (text) => (text.length > 24 ? `${text.slice(0, 23)}…` : text);
@@ -20,11 +24,12 @@ export function createNotesView({ search, list, count }, actions) {
   const openBodies = createOpenBodies();
   const renaming = createRename();
   let query = '';
-  let last = null; // the latest snapshot, so a click here can redraw just this list
+  let last = null;          // the latest snapshot, so a click here can redraw just this list
+  let redrawPending = false; // a UI-only change (search, expand, rename) arrived while a drag held it back
 
   search.addEventListener('input', () => {
     query = search.value;
-    if (last) render(last);
+    redraw();
   });
 
   const handlers = {
@@ -76,8 +81,24 @@ export function createNotesView({ search, list, count }, actions) {
     list.scrollTop = scrolled;
   }
 
+  // A local, UI-only change (the search text, which body is open, which title is being renamed) needs
+  // this list repainted, but not through the render gate: none of these touch the store. Rebuilding the
+  // whole list is exactly what must NOT happen while a drag (ui/dragList.js) is moving one of its own
+  // rows — the row it is mid-move would be torn out from under it — and that can genuinely happen: one
+  // hand drags with the mouse while the other ends an already-open rename with Enter, or keeps typing in
+  // the (still-focused) search box, both entirely ordinary. So: skip while a `.dragging` row is present,
+  // remember to catch up, and catch up the moment app.js reports the drag is over (flushIfPending).
   function redraw() {
-    if (last) render(last);
+    if (!last) return;
+    if (list.querySelector('.task-row.dragging')) { redrawPending = true; return; }
+    redrawPending = false;
+    render(last);
+  }
+
+  // Called by app.js once the Notes list's drag has ended (however it ended): if a redraw was held back
+  // because of it, it is safe now.
+  function flushIfPending() {
+    if (redrawPending) redraw();
   }
 
   // Empty the search box (a note added while a search was showing would otherwise be hidden by it).
@@ -96,5 +117,5 @@ export function createNotesView({ search, list, count }, actions) {
   // Is the user typing in one of this list's body editors? (Then it must not be redrawn under them.)
   const isEditing = () => isEditingIn(list);
 
-  return { render, open, clearSearch, isEditing };
+  return { render, open, clearSearch, isEditing, flushIfPending };
 }

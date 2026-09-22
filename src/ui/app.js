@@ -5,7 +5,7 @@
 import { createItemStore } from '../core/itemStore.js';
 import { createBridge } from './bridge.js';
 import { createCaptureBox } from './captureBox.js';
-import { createDragList } from './dragList.js';
+import { createDragList, DRAG_ENDED } from './dragList.js';
 import { createHover } from './hover.js';
 import { createLinkTitles } from './linkTitles.js';
 import { createNotice, describeLoadNotice, SAVE_FAILED } from './notice.js';
@@ -124,6 +124,9 @@ const notesBadge = createNotesBadgeView({ button: $('notesBtn'), count: $('notes
 // to the view — a view receives data and actions, not app-level machinery (see R2 in the architecture
 // test, which is exactly what caught this the first time it was tried the other way round).
 const noteDrag = createDragList({ container: $('noteList'), onReorder: actions.reorder });
+// The Notes list held its own repaint back while that drag was moving one of its rows (notesView.js's
+// redraw()); now it's safe.
+document.addEventListener(DRAG_ENDED, () => notes.flushIfPending());
 
 // Is a notes editor being typed in, on either list? And which boxes count as "typed in" when they have text.
 const editingBody = () => inbox.isEditing() || notes.isEditing();
@@ -244,7 +247,14 @@ bridge.lifecycle.onShown(() => {
   panel.open();
   setTimeout(() => input.focus(), 50);
 });
-bridge.lifecycle.onHidden(() => panel.close({ immediate: true }));
+bridge.lifecycle.onHidden(() => {
+  // Before anything else: a drag in progress ends right now, not whenever (if ever) the OS/Electron
+  // would otherwise tell the page its pointer stream was interrupted. Cancelling it first, rather than
+  // relying on that, also means the immediate collapse below — which blurs whatever has focus, ending a
+  // rename if one was open — never has a `.dragging` row to contend with in the first place.
+  noteDrag.cancel();
+  panel.close({ immediate: true });
+});
 
 // Escape: first step out of the ⚙ screen, then collapse the panel.
 document.addEventListener('keydown', (e) => {

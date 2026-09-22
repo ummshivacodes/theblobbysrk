@@ -12,11 +12,20 @@
 // A row's drag handle is any element inside it carrying the class `drag-handle`; the row itself is the
 // nearest ancestor with a `data-id` (every row in this app already has one, from ui/dom.js's `el()`).
 //
-//   createDragList({ container, onReorder(orderedIds) }) -> { isDragging(), destroy() }
+//   createDragList({ container, onReorder(orderedIds) }) -> { isDragging(), cancel(), destroy() }
 //
 // Esc cancels a drag in progress: the row goes back exactly where it started, and onReorder is not
 // called. Letting go anywhere else — even back at the start — calls onReorder only if the order actually
 // changed (dropping something back where it was is not a move).
+//
+// However a drag ends — committed, cancelled, or force-cancelled via `cancel()` — `container` is sent a
+// `DRAG_ENDED` event (bubbles), AFTER the `.dragging` class is already removed: a list that skipped one of
+// its own redraws while this drag was moving one of its rows (rebuilding the whole container mid-drag
+// would corrupt the row reference above) listens for this to know it is safe to catch up. `cancel()` is
+// for a caller that needs the drag definitely over right now — the window being hidden, say — without
+// waiting on whatever Electron/the OS does to the pointer stream when that happens.
+export const DRAG_ENDED = 'blob:drag-ended';
+
 export function createDragList({ container, onReorder }) {
   let drag = null; // { row, pointerId, startIndex } while a drag is in progress
 
@@ -53,7 +62,7 @@ export function createDragList({ container, onReorder }) {
     if (drag.row.nextSibling !== ref) container.insertBefore(drag.row, ref);
   }
 
-  // commit: false for Esc/pointercancel — put the row back where it started, call nothing.
+  // commit: false for Esc/pointercancel/cancel() — put the row back where it started, call nothing.
   function finish(commit) {
     const { row, startIndex } = drag;
     row.classList.remove('dragging');
@@ -65,6 +74,7 @@ export function createDragList({ container, onReorder }) {
       container.insertBefore(row, without[startIndex] || null);
     }
     drag = null;
+    container.dispatchEvent(new CustomEvent(DRAG_ENDED, { bubbles: true }));
   }
 
   function onPointerUp(e) {
@@ -90,6 +100,9 @@ export function createDragList({ container, onReorder }) {
 
   return {
     isDragging: () => !!drag,
+    // Ends a drag in progress right now, as if Esc had been pressed — no commit, the row goes back.
+    // Harmless (and cheap: just the boolean check) when nothing is being dragged.
+    cancel() { if (drag) finish(false); },
     destroy() {
       container.removeEventListener('pointerdown', onPointerDown);
       document.removeEventListener('pointermove', onPointerMove);

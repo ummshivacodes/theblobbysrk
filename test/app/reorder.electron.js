@@ -75,8 +75,11 @@ function pageDriver() {
       panelSettled: $('#panel').offsetHeight >= $('.panel-inner').offsetHeight,
       screen: $('#notesScreen').classList.contains('active') ? 'notes' : $('#mainScreen').classList.contains('active') ? 'main' : '?',
       order,
+      text: order.map((id) => $('.task-text', rowEl(id)).textContent.trim()),
       dragging: order.map((id) => rowEl(id).classList.contains('dragging')),
+      anyDragging: !!$('#noteList .task-row.dragging'),
       handleShown: order.map((id) => !!$('.drag-handle', rowEl(id))),
+      rename: $('.title-edit') ? { value: $('.title-edit').value, focused: document.activeElement === $('.title-edit') } : null,
       // A different row's body, whichever mode it is currently in, so a drag elsewhere can be checked not to
       // disturb it: mid-drag it should stay in edit mode with the caret in it; once a deferred redraw finally
       // catches up (after the drag ends), it is expected to settle into read mode showing the saved text.
@@ -126,6 +129,19 @@ function pageDriver() {
       resolve({ x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) });
     })),
     pageKey: (key) => { document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })); return snapshot(); },
+    // Renaming: double-click a title, type into the box that appears, press a key in it.
+    dblclick: (id) => { fire($('.task-text', rowEl(id)), 'dblclick'); return snapshot(); },
+    renameType: (id, value) => {
+      const box = need($('.title-edit', rowEl(id)), 'title editor');
+      box.value = value;
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+      return snapshot();
+    },
+    renameKey: (id, key, init = {}) => {
+      need($('.title-edit', rowEl(id)), 'title editor').dispatchEvent(
+        new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init }));
+      return snapshot();
+    },
   };
 
   window.__reorder = Object.fromEntries(Object.entries(actions).map(([name, fn]) => [name, async (...args) => {
@@ -305,6 +321,62 @@ app.whenReady().then(async () => {
   }), JSON.stringify(disk().threads.map((t) => [t.id, t.order])));
   await act('blurActive');
   await act('expander', 'n4');
+
+  // ---- ending a DIFFERENT row's rename with Enter, mid-drag, must not rebuild the list out from under it ----
+  // Found by a Phase-5-style reviewer audit (2026-09-22), against the plan's own ("even less reachable than
+  // the rename-vs-rename finding") reasoning: a real single pointer can't click two rows, but one hand can
+  // still drag with the mouse while the other ends an already-open rename with Enter — an entirely ordinary
+  // two-handed action, not a second input device. Order entering this section: n3, n2, n4, n1.
+  await act('dblclick', 'n1');
+  s = await until((x) => x.rename && x.rename.focused);
+  check('(setup) renaming n1 (last in the list), caret in the box', !!s, why(s));
+  await act('renameType', 'n1', 'renamed while n2 drags');
+  drag = await dragTo('n2', ['n4']); // a different row entirely
+  s = await act('snapshot');
+  check('(setup) n2 is mid-drag while n1 is mid-rename, at the same time', s.dragging[s.order.indexOf('n2')] && s.rename && s.rename.value === 'renamed while n2 drags');
+  s = await act('renameKey', 'n1', 'Enter'); // the other hand, on the keyboard
+  check('n2\'s drag is UNDISTURBED by ending n1\'s rename: still marked dragging, not rebuilt out from under it',
+    s.dragging[s.order.indexOf('n2')], JSON.stringify(s));
+  check('…n1\'s edit is not lost — it is just not repainted yet (the list redraw is held back by the drag)',
+    s.rename && s.rename.value === 'renamed while n2 drags' && !s.rename.focused, JSON.stringify(s.rename));
+  drag.release();
+  s = await until((x) => x.rename === null && x.order.join() === ['n3', 'n4', 'n2', 'n1'].join());
+  check('once the drag ends, the held-back rename-end catches up: plain text, in the right place', !!s, why(s));
+  check('…reading the new title', !!s && s.text[s.order.indexOf('n1')] === 'renamed while n2 drags', why(s));
+  check('…both changes saved: the rename and the reorder', await untilDisk((d) => {
+    const byId = Object.fromEntries(d.threads.map((t) => [t.id, t]));
+    return byId.n1.text === 'renamed while n2 drags' && byId.n3.order === 0 && byId.n4.order === 1 && byId.n2.order === 2 && byId.n1.order === 3;
+  }), JSON.stringify(disk().threads.map((t) => [t.id, t.text, t.order])));
+
+  // ---- the window being hidden mid-drag (the global hotkey can fire regardless of focus) cancels it cleanly ----
+  // Defence in depth: app.js calls noteDrag.cancel() before collapsing, rather than relying on Electron/the
+  // OS to interrupt the pointer stream on its own when a window is hidden.
+  await act('hoverShell', true);
+  s = await until((x) => x.panelOpen && x.panelSettled);
+  if (!check('(setup) the panel is open', !!s, why(s))) return finish();
+  const beforeHide = s.order.join();
+  drag = await dragTo('n4', ['n2']);
+  s = await act('snapshot');
+  check('(setup) a drag is in progress', s.anyDragging, JSON.stringify(s));
+  lifecycle('window-hidden'); // what main sends when the hotkey (or anything else) hides the window
+  s = await until((x) => !x.panelOpen);
+  check('the panel collapses as it always does when the window is hidden', !!s, why(s));
+  check('…and the drag was cancelled, not left stuck: no row is marked dragging', !s.anyDragging, JSON.stringify(s));
+  check('…the row went back where it was — cancelling is exactly like Esc, not a move', s.order.join() === beforeHide, s.order.join());
+  drag.release(); // the real mouse button the OS/Electron doesn't know is now irrelevant
+  lifecycle('window-shown');
+  await act('hoverShell', true);
+  s = await until((x) => x.panelOpen && x.panelSettled);
+  if (!check('(setup) back open', !!s, why(s))) return finish();
+  // Hiding collapsed the panel, which (like Esc) also steps back to the main screen — reopen Notes
+  // before trying another drag there.
+  await act('click', '#notesBtn');
+  s = await until((x) => x.screen === 'notes');
+  if (!check('(setup) the Notes screen is showing again, for one more real drag to prove nothing is left stuck', !!s, why(s))) return finish();
+  drag = await dragTo('n1', ['n3']);
+  drag.release();
+  s = await until((x) => x.order.join() !== beforeHide);
+  check('a fresh drag afterwards still works normally: nothing about the render gate stayed stuck "held"', !!s, why(s));
 
   // ---- leaving the screen mid-drag is not something a person can normally do, but make sure the app is left sane
   await act('pageKey', 'Escape');
