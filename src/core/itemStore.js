@@ -85,6 +85,14 @@ export function createItemStore(persistence, onChange, { onSaveError = () => {} 
     return id;
   }
 
+  // Where a new or newly-filed note lands: the top, matching what "newest edited first" always put a fresh
+  // note at, before notes had a manual order. (A reorderable task list, if it is ever built, would append
+  // at the BOTTOM instead — that list's natural order runs the other way. See docs/REORDER-PLAN.md.)
+  function topOfNotes() {
+    const orders = state.threads.filter((t) => t.status === 'note' && Number.isFinite(t.order)).map((t) => t.order);
+    return orders.length ? Math.min(...orders) - 1 : 0;
+  }
+
   // A note goes straight to the notes shelf. It is not a task, so it does not count as "listed". Like
   // addTask, a blank title captures nothing and returns null.
   function addNote(text, body) {
@@ -92,7 +100,7 @@ export function createItemStore(persistence, onChange, { onSaveError = () => {} 
     if (!title) return null;
     const id = newId();
     const now = Date.now();
-    const item = { id, text: title, quad: null, status: 'note', createdAt: now, updatedAt: now };
+    const item = { id, text: title, quad: null, status: 'note', createdAt: now, updatedAt: now, order: topOfNotes() };
     const notes = cleanBody(body);
     if (notes) item.body = notes;
     state.threads.push(item);
@@ -162,24 +170,28 @@ export function createItemStore(persistence, onChange, { onSaveError = () => {} 
     commit();
   }
 
-  // Dump → note. It was never really a task, so it stops being counted as one.
+  // Dump → note. It was never really a task, so it stops being counted as one. Lands at the top of the
+  // notes list, the same place a captured note lands: it was just moved here, so it should be easy to find.
   function fileAsNote(id) {
     const t = find(id);
     if (!t || t.status !== 'dump') return;
     t.status = 'note';
     t.quad = null;
     t.updatedAt = Date.now();
+    t.order = topOfNotes();
     state.stats.listed = Math.max(0, state.stats.listed - 1);
     commit();
   }
 
-  // Note → dump: untagged, and counted as a task again.
+  // Note → dump: untagged, and counted as a task again. Its position among the notes no longer means
+  // anything, so it goes with it — the same "clear what no longer applies" rule as the quad above.
   function unfileNote(id) {
     const t = find(id);
     if (!t || t.status !== 'note') return;
     t.status = 'dump';
     t.quad = null; // untagged, whatever a damaged file may have left on the note
     t.updatedAt = Date.now();
+    delete t.order;
     state.stats.listed++;
     commit();
   }
@@ -221,6 +233,22 @@ export function createItemStore(persistence, onChange, { onSaveError = () => {} 
     commit();
   }
 
+  // Manual order for notes (drag-and-drop). `orderedIds` must be exactly the current notes, in their new
+  // sequence: no more, no fewer, no duplicate, nothing that isn't a note. A caller that doesn't have that
+  // (stale data, a note deleted mid-drag) gets a no-op rather than a half-applied reorder — the same
+  // "guard hard, no-op safely" rule as every other transition here. Tasks aren't reorderable yet (see
+  // docs/REORDER-PLAN.md), so this only ever accepts a set of note ids.
+  function reorderItems(orderedIds) {
+    if (!Array.isArray(orderedIds) || orderedIds.length === 0) return; // nothing to reorder is not a move
+    if (!orderedIds.every((id) => typeof id === 'string')) return;
+    const givenIds = new Set(orderedIds);
+    if (givenIds.size !== orderedIds.length) return; // a duplicate id: not a valid full ordering
+    const currentIds = new Set(state.threads.filter((t) => t.status === 'note').map((t) => t.id));
+    if (givenIds.size !== currentIds.size || ![...givenIds].every((id) => currentIds.has(id))) return;
+    orderedIds.forEach((id, index) => { find(id).order = index; });
+    commit();
+  }
+
   // Deleting a task does not shrink the lifetime counters or the crossed-off history. It does cancel a
   // close in flight, so a deleted thread can't still "complete" (and score) a moment later.
   function deleteItem(id) {
@@ -257,6 +285,7 @@ export function createItemStore(persistence, onChange, { onSaveError = () => {} 
     setBody,
     setText,
     setLinkTitle,
+    reorderItems,
     deleteItem,
     toggleFocus,
   };

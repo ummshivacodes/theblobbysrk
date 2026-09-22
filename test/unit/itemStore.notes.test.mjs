@@ -39,7 +39,9 @@ const dump = (over) => item({ status: 'dump', quad: null, ...over });
 const tagged = (over) => item({ status: 'dump', quad: 3, ...over });   // tagged in the inbox, not pushed yet
 const axis = (over) => item({ status: 'axis', quad: 2, ...over });
 const done = (over) => item({ status: 'done', quad: 2, doneAt: EARLIER + 60_000, ...over });
-const note = (over) => item({ status: 'note', quad: null, ...over });
+// order: 0 by default so a fixture note is already "seeded" (see migrate.js's seedNoteOrder) and loadState
+// doesn't add one behind this file's back — this file is about the store's operations, not ordering.
+const note = (over) => item({ status: 'note', quad: null, order: 0, ...over });
 
 // The store starts from a fake disk. Counters are zeroed after loading, so a test only sees what
 // its own call caused. `saves` holds a deep copy of every payload handed to persistence.saveThreads;
@@ -150,9 +152,11 @@ describe('addNote(text, body?)', () => {
   it('has exactly the fields of the data model, and no others', async () => {
     const h = await setup();
     const plain = h.store.addNote('call the plumber');
-    assert.deepEqual(h.row(plain), { id: plain, text: 'call the plumber', createdAt: T0, status: 'note', quad: null, updatedAt: T0 });
+    // order: the first note lands at 0; the next one lands ABOVE it (further from 0), same as a fresh
+    // note always landing at the top used to fall out of "newest edited first" for free.
+    assert.deepEqual(h.row(plain), { id: plain, text: 'call the plumber', createdAt: T0, status: 'note', quad: null, updatedAt: T0, order: 0 });
     const withBody = h.store.addNote('groceries', 'milk\neggs');
-    assert.deepEqual(h.row(withBody), { id: withBody, text: 'groceries', createdAt: T0, status: 'note', quad: null, body: 'milk\neggs', updatedAt: T0 });
+    assert.deepEqual(h.row(withBody), { id: withBody, text: 'groceries', createdAt: T0, status: 'note', quad: null, body: 'milk\neggs', updatedAt: T0, order: -1 });
   });
 
   it('does not count as a listed task: stats.listed stays where it was', async () => {
@@ -265,7 +269,8 @@ describe('fileAsNote(id): dump -> note', () => {
     const h = await setup([tagged({ id: 'a', text: 'https://example.com/a', body: 'why I saved it', linkTitle: 'Example A' })]);
     const before = structuredClone(h.row());
     h.store.fileAsNote('a');
-    assert.deepEqual(without(h.row(), 'status', 'quad', 'updatedAt'), without(before, 'status', 'quad', 'updatedAt'));
+    // order also changes (it gains one, landing at the top of the notes) — expected, like status/quad/updatedAt.
+    assert.deepEqual(without(h.row(), 'status', 'quad', 'updatedAt', 'order'), without(before, 'status', 'quad', 'updatedAt', 'order'));
   });
 
   it('saves once and notifies once', async () => {
@@ -333,7 +338,8 @@ describe('unfileNote(id): note -> dump', () => {
     const h = await setup([note({ id: 'a', text: 'https://example.com/a', body: 'why I saved it', linkTitle: 'Example A', updatedAt: EARLIER })]);
     const before = structuredClone(h.row());
     h.store.unfileNote('a');
-    assert.deepEqual(without(h.row(), 'status', 'quad', 'updatedAt'), without(before, 'status', 'quad', 'updatedAt'));
+    // order also changes (it is dropped: it no longer means anything for a task) — expected, like status/quad/updatedAt.
+    assert.deepEqual(without(h.row(), 'status', 'quad', 'updatedAt', 'order'), without(before, 'status', 'quad', 'updatedAt', 'order'));
   });
 
   it('saves once and notifies once', async () => {
@@ -397,6 +403,101 @@ describe('filing and unfiling', () => {
     h.store.unfileNote(id);
     assert.equal(h.row(id).status, 'dump');
     assert.equal(h.listed(), 6);
+  });
+});
+
+describe('reorderItems(orderedIds): manual order for notes (drag-and-drop)', () => {
+  it('sets each note\'s order to its index in the given sequence', async () => {
+    const h = await setup([note({ id: 'a' }), note({ id: 'b' }), note({ id: 'c' })]);
+    assertCommittedOnce(h, () => h.store.reorderItems(['c', 'a', 'b']));
+    assert.equal(h.row('c').order, 0);
+    assert.equal(h.row('a').order, 1);
+    assert.equal(h.row('b').order, 2);
+  });
+
+  it('a full reverse works the same way', async () => {
+    const h = await setup([note({ id: 'a', order: 0 }), note({ id: 'b', order: 1 }), note({ id: 'c', order: 2 })]);
+    h.store.reorderItems(['c', 'b', 'a']);
+    assert.equal(h.row('c').order, 0);
+    assert.equal(h.row('b').order, 1);
+    assert.equal(h.row('a').order, 2);
+  });
+
+  it('a single note reorders trivially to 0', async () => {
+    const h = await setup([note({ id: 'a', order: 7 })]);
+    assertCommittedOnce(h, () => h.store.reorderItems(['a']));
+    assert.equal(h.row('a').order, 0);
+  });
+
+  it('touches nothing else about the notes, or any other item', async () => {
+    const h = await setup([
+      note({ id: 'a', text: 'first', body: 'b', linkTitle: 'L', updatedAt: EARLIER }),
+      note({ id: 'b' }),
+      dump({ id: 'd' }),
+      axis({ id: 'x' }),
+    ]);
+    h.store.reorderItems(['b', 'a']);
+    assert.equal(h.row('a').text, 'first');
+    assert.equal(h.row('a').body, 'b');
+    assert.equal(h.row('a').linkTitle, 'L');
+    assert.equal(h.row('a').updatedAt, EARLIER, 'reordering is not a content edit: updatedAt is not touched');
+    assert.deepEqual(h.row('d'), { id: 'd', text: 'a thing to do', createdAt: EARLIER, status: 'dump', quad: null });
+    assert.deepEqual(h.row('x'), { id: 'x', text: 'a thing to do', createdAt: EARLIER, status: 'axis', quad: 2 });
+  });
+
+  it('is not an array: no-op', async () => {
+    for (const bad of [undefined, null, 'a', 42, {}, { 0: 'a', length: 1 }]) {
+      const h = await setup([note({ id: 'a' })]);
+      assertNoOp(h, () => h.store.reorderItems(bad), `reorderItems(${JSON.stringify(bad)})`);
+    }
+  });
+
+  it('an empty array is a no-op, even with notes present: reordering nothing is not a move', async () => {
+    const h = await setup([note({ id: 'a' }), note({ id: 'b' })]);
+    assertNoOp(h, () => h.store.reorderItems([]));
+  });
+
+  it('an array containing something other than a string is a no-op', async () => {
+    const h = await setup([note({ id: 'a' }), note({ id: 'b' })]);
+    for (const bad of [['a', 42], ['a', null], [{ id: 'b' }], ['a', undefined]]) {
+      assertNoOp(h, () => h.store.reorderItems(bad), `reorderItems(${JSON.stringify(bad)})`);
+    }
+  });
+
+  it('a duplicate id is a no-op: not a valid full ordering', async () => {
+    const h = await setup([note({ id: 'a' }), note({ id: 'b' })]);
+    assertNoOp(h, () => h.store.reorderItems(['a', 'a']));
+  });
+
+  it('missing one of the current notes is a no-op (a partial reorder is not accepted)', async () => {
+    const h = await setup([note({ id: 'a' }), note({ id: 'b' }), note({ id: 'c' })]);
+    assertNoOp(h, () => h.store.reorderItems(['a', 'b']));
+  });
+
+  it('an id that is not a current note is a no-op, even alongside every real note id', async () => {
+    const h = await setup([note({ id: 'a' }), note({ id: 'b' })]);
+    assertNoOp(h, () => h.store.reorderItems(['a', 'b', 'ghost']));
+  });
+
+  it('an id that belongs to a task, not a note, is a no-op: tasks are not reorderable yet', async () => {
+    const h = await setup([note({ id: 'a' }), dump({ id: 'd' })]);
+    assertNoOp(h, () => h.store.reorderItems(['a', 'd']));
+    assertNoOp(h, () => h.store.reorderItems(['d']));
+  });
+
+  it('a note deleted mid-drag makes the (now stale) reorder a no-op, not a half-applied one', async () => {
+    const h = await setup([note({ id: 'a' }), note({ id: 'b' }), note({ id: 'c' })]);
+    const staleOrder = ['c', 'b', 'a']; // captured before the delete, as a real drag's drop handler would have it
+    h.store.deleteItem('b');
+    h.reset();
+    assertNoOp(h, () => h.store.reorderItems(staleOrder));
+    assert.equal(h.row('a').order, 0, 'unchanged from its fixture value');
+    assert.equal(h.row('c').order, 0, 'unchanged from its fixture value');
+  });
+
+  it('saves once and notifies once', async () => {
+    const h = await setup([note({ id: 'a' }), note({ id: 'b' })]);
+    assertCommittedOnce(h, () => h.store.reorderItems(['b', 'a']));
   });
 });
 

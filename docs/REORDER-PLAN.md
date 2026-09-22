@@ -1,13 +1,15 @@
 # Blob: a credit line + drag-to-reorder — implementation plan
 
-Status: **not started — written for the owner to review/edit before anyone implements it.**
+Status: **in progress — Phase B done. Owner said "go ahead, notes only"; scoped down from both lists to the Notes list.**
 Written 2026-09-22, after Phase 5 (the notes UI) shipped. Two independent, differently-sized asks:
 
 1. A one-line credit in the panel: **"Blob — made by SRK."** Presentational only; no plan needed
    beyond where it goes (§5). Do it whenever, in the same commit as this plan's first phase or on its own.
-2. **Drag-and-drop reordering**, up or down, in the two vertical lists (the task list, the Notes list).
-   This is the real feature this plan is for: it needs a data-model change, a new store transition, and a
-   new interaction that has to cooperate with machinery already built for a related reason (§2, §3).
+2. **Drag-and-drop reordering**, up or down, in the **Notes list only** — the owner scoped this down from
+   "both lists" when asked ("go ahead, notes only"). The task list is unaffected: no `order` field, no
+   drag handle, `inboxItems()`'s sort is untouched. Everything below that talked about the inbox group is
+   kept as written (a record of the reasoning and a seam for later — see §9), but nothing under Phase B or
+   C touches it.
 
 Out of scope, stated up front so it's easy to correct: the **axis** is not reorderable by dragging. It's a
 computed horizontal layout, not a list with an up/down order, and "up or down" in the ask doesn't fit it.
@@ -60,12 +62,13 @@ Item = {
     exports `isNote`, `byCreatedAsc`, `newestEditFirst`; `selectors.js` is refactored to import them instead of
     keeping its own private copies (a no-behaviour-change refactor, its own commit, gated by the existing
     selectors tests staying green with zero changes); `migrate.js` imports the same ones for the backfill.
-- **A new item gets the end of its group**, same as today's implicit "new things go at the bottom" via
-  `createdAt`: `order = 1 + max(existing orders in that group, defaulting to -1)`. `addTask`, `addNote`,
-  `unfileNote` (dump → task again) all need this; `fileAsNote` doesn't assign one (a task becoming a note picks
-  up notes' ordering only once it's actually placed among them by a drag, or by the migration-style backfill
-  rule above if it's simplest to apply the same "assign on first read" logic instead of on every transition —
-  worth deciding in the implementing phase, not this plan).
+- **A new note gets the position a fresh note always had: the top.** Corrected during implementation — the
+  plan's first draft said "the end of the group", copying the INBOX list's convention (new task = bottom, since
+  that list sorts oldest-created-first). Notes sort newest-edited-first by default, so a brand-new note has
+  always appeared at the top; keeping that on `addNote` and `fileAsNote` means the switch to manual order is
+  truly invisible until you drag something, exactly as intended. Concretely: `order = min(existing note
+  orders, defaulting to 0) - 1`. `unfileNote` (note → task) drops `order` entirely — it means nothing outside
+  the notes group, the same way `fileAsNote` already drops `quad` when a task becomes a note.
 
 ## 3. The store: one new transition
 
@@ -80,19 +83,22 @@ Guarded like every other transition (a bad call is a no-op, no save, no redraw):
   the full current list in hand anyway, since it just finished dragging within it.)
 - On success: `order = index` for each id in the given sequence, one `commit()` (one save, one redraw) — same
   shape as every other mutator in `itemStore.js`.
-- Unit-tested the same way the rest of the store is: the happy path, a stale/mismatched id set, a mixed group,
-  a duplicate id, an empty array, a single-item no-op, and that a mutation-tested guard actually rejects what
-  it says it rejects.
+- Unit-tested the same way the rest of the store is: the happy path (and its exact reverse), a stale/mismatched
+  id set (in particular a note deleted mid-drag — the drop handler's captured list is now stale, and must be
+  rejected rather than half-applied), an id belonging to a task, a duplicate id, and an empty array (a true
+  no-op: "reorder nothing" is not a move) — each confirmed by a mutation test that the guard it targets is
+  actually load-bearing.
 
 `selectors.js`'s `inboxItems`/`notes` sort by `order` ascending (falling back to today's comparator — `byCreatedAsc` /
 `newestEditFirst` — for the tie-break, and for any item that somehow still lacks one, which should only ever be
 possible for a moment before a group's first-ever backfill).
 
-**Open question for the owner, not blocking the plan, worth a line when you read this:** today `notes()` is
-"newest edited first" — a genuinely useful auto-surfacing behaviour. Once you drag anything, that group's order
-becomes manual and stays manual (editing a note no longer moves it) — dragging is a deliberate act and should
-stick, the same way tagging a task doesn't auto-move it on the axis. If you'd rather keep notes auto-sorted by
-recency and only make the **task list** draggable, say so and this plan drops the notes half of §5/§6.
+**Decided:** notes only (see the top of this plan). `notes()`'s "newest edited first" default now only applies
+until the first drag — after that, order is manual and sticky (editing a note no longer moves it), the same way
+tagging a task doesn't auto-move it on the axis. Confirmed in Phase B: the Phase 4 notes test had one assertion
+that assumed the old behaviour ("editing a note moves it to the top"); it now asserts the opposite, with a
+comment explaining why — the same kind of deliberate, documented change `ui.electron.js` got exactly once for
+the `version` field.
 
 ## 4. The render gate and press guard need one more "is something going on" signal
 
@@ -188,4 +194,15 @@ it is not a thing (only `app.js` constructs and wires it, exactly like the rende
 
 ## 10. Progress log
 
-Nothing implemented yet. Fill in here as phases land, the same way `docs/NOTES-PLAN.md` §11 does.
+**2026-09-22**
+- **Phase B done** (branch `notes-reorder`): `naturalOrder.js` extracted from `selectors.js` (no-behaviour-change,
+  confirmed by the existing selectors/migrate tests passing unchanged before any new behaviour was added);
+  `migrate.js`'s `seedNoteOrder` backfill; `selectors.js`'s `notes()` sorts by manual order with a
+  newest-edited-first fallback; `itemStore.js` gains `reorderItems` (guarded, mutation-tested) and assigns/drops
+  `order` on `addNote`/`fileAsNote`/`unfileNote`. `npm run verify` green (1,108 unit tests; both Phase-0 and Phase
+  4 Electron tests green — the latter with two deliberate, documented changes: editing a note no longer reorders
+  the list, and `order` is a known field). Corrected while implementing: a new note lands at the TOP of the
+  group (matching what "newest edited first" always did for a fresh note), not the bottom — the plan's first
+  draft got this backwards by copying the (unbuilt) inbox list's convention; see §2.
+- **Next: Phase C, the drag UI itself** (`dragList.js`, the handle, wiring into `notesView.js` only).
+

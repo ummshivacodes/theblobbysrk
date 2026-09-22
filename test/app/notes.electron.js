@@ -602,14 +602,16 @@ app.whenReady().then(async () => {
   check('what is typed in a note saves as you go',
     await untilDisk((d) => noteOnDisk(d, 'call the vet about Bruno').body === 'ask about the booster shot'));
   s = await act('snapshot');
-  check('…and the list does not reorder under your hands while you type (the edit made it the newest)',
+  check('…and the list does not reorder under your hands while you type',
     titles(s)[0] === 'a passing thought' && await act('isMarked', 'call the vet about Bruno', '#noteList')
       && noteOf(s, 'call the vet about Bruno').body.focused);
   await act('blurActive');
-  s = await until((x) => x.notes.length > 0 && x.notes[0].text === 'call the vet about Bruno');
-  check('…when you finish, the note you edited is at the top, its notes shown as text', !!s
-    && noteOf(s, 'call the vet about Bruno').body.mode === 'read' && noteOf(s, 'call the vet about Bruno').body.value === 'ask about the booster shot', why(s));
-  check('…and it says it was edited just now', !!s && noteOf(s, 'call the vet about Bruno').when === 'edited just now');
+  s = await until((x) => noteOf(x, 'call the vet about Bruno').body && noteOf(x, 'call the vet about Bruno').body.mode === 'read');
+  check('…when you finish, its notes show as text', !!s
+    && noteOf(s, 'call the vet about Bruno').body.value === 'ask about the booster shot', why(s));
+  check('…and editing it does NOT move it: notes have a manual order now, and only dragging changes that',
+    titles(s).join() === ['a passing thought', 'call the vet about Bruno', 'later task A'].join(), titles(s).join());
+  check('…it still says it was edited just now, even though it did not move', noteOf(s, 'call the vet about Bruno').when === 'edited just now');
 
   // ↩ puts a note back in the task dump.
   s = await act('rowClick', 'later task A', '.task-act.unfile', '#noteList');
@@ -1007,7 +1009,7 @@ app.whenReady().then(async () => {
   expectEq('the file still holds exactly threads, stats, history and its version', Object.keys(d).sort(),
     ['history', 'stats', 'threads', 'version']);
   check('every saved item has only known fields (no UI state such as "expanded" leaks in)', d.threads.every((t) =>
-    Object.keys(t).every((k) => ['id', 'text', 'quad', 'status', 'createdAt', 'updatedAt', 'doneAt', 'focused', 'body', 'linkTitle'].includes(k))));
+    Object.keys(t).every((k) => ['id', 'text', 'quad', 'status', 'createdAt', 'updatedAt', 'doneAt', 'focused', 'body', 'linkTitle', 'order'].includes(k))));
 
   const stray = await act('strayHovers');
   if (stray.length) console.log(`note: ${stray.length} real mouseenter/mouseleave event(s) reached the sealed window and were ignored: ${stray.join(' | ')}`);

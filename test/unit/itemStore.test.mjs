@@ -115,12 +115,13 @@ describe('createItemStore', () => {
   });
 
   // The API surface is pinned on purpose. When a phase adds operations, this list is meant to be edited
-  // deliberately in the same commit (Phase 3 added the note operations and renamed deleteTask).
-  it('exposes exactly the live state and fifteen operations', () => {
+  // deliberately in the same commit (Phase 3 added the note operations and renamed deleteTask; the notes
+  // reorder work added reorderItems).
+  it('exposes exactly the live state and sixteen operations', () => {
     const { store } = newStore();
     assert.deepEqual(Object.keys(store).sort(), [
       'addNote', 'addTask', 'deleteItem', 'dispatchToAxis', 'fileAsNote', 'loadState', 'recallToDump',
-      'reopenTask', 'resolveThread', 'setBody', 'setLinkTitle', 'setText', 'state', 'tagTask',
+      'reopenTask', 'reorderItems', 'resolveThread', 'setBody', 'setLinkTitle', 'setText', 'state', 'tagTask',
       'toggleFocus', 'unfileNote',
     ]);
     for (const [name, value] of Object.entries(store)) {

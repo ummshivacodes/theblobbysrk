@@ -157,7 +157,7 @@ describe('migrate: a v1 file (no version, stats or history)', () => {
 });
 
 describe('migrate: threads', () => {
-  it('keeps every plain-object entry, in order, with all its fields (unknown ones too)', () => {
+  it('keeps every plain-object entry, in order, with all its fields (unknown ones too) — except a note gains a manual order', () => {
     const threads = [
       { id: 'a', text: 'a', status: 'dump', quad: null, createdAt: 1, body: 'b', updatedAt: 5, linkTitle: 't', focused: true },
       { id: 'b', status: 'note', quad: 3, createdAt: 2, futureField: { nested: [1, { deep: true }] }, nothing: null, missing: undefined },
@@ -166,7 +166,8 @@ describe('migrate: threads', () => {
       { id: 'a', text: 'the same id again' },
     ];
     const out = migrate({ version: 2, threads, stats: { listed: 4, done: 0 }, history: [] });
-    assert.deepEqual(out.threads, threads);
+    // The one note ('b') is the whole notes group, so it becomes order 0; nothing else changes.
+    assert.deepEqual(out.threads, threads.map((t) => (t.status === 'note' ? { ...t, order: 0 } : t)));
   });
 
   it('never invents an id, an item or a field', () => {
@@ -190,7 +191,8 @@ describe('migrate: threads', () => {
       [], [1, 2], [{ id: 'nested' }], new Date(0), new Map(), new Set(), /re/,
     ];
     const out = migrate({ threads: [junk[0], keepFirst, ...junk.slice(1), keepLast] });
-    assert.deepEqual(out.threads, [keepFirst, keepLast]);
+    // keepLast is a note (and the only one), so it becomes order 0.
+    assert.deepEqual(out.threads, [keepFirst, { ...keepLast, order: 0 }]);
   });
 
   it('keeps items with an empty object body, array-valued fields and so on', () => {
@@ -209,6 +211,86 @@ describe('migrate: threads', () => {
     assert.equal(out.threads[0].admin, undefined);
     // ...and the data itself is not lost, just kept inert.
     assert.ok(Object.hasOwn(out.threads[0], '__proto__'));
+  });
+});
+
+describe('migrate: a note gets a manual order the first time a file needs one', () => {
+  it('a file with no notes at all is untouched', () => {
+    const threads = [item('a', 'dump'), item('b', 'axis')];
+    assert.deepEqual(migrate({ threads }).threads, threads);
+  });
+
+  it('several notes with no order are numbered 0..n-1 by today\'s "newest edited first" rule', () => {
+    const threads = [
+      item('oldest', 'note', { createdAt: 100, updatedAt: 100 }),
+      item('newest', 'note', { createdAt: 300, updatedAt: 300 }),
+      item('middle', 'note', { createdAt: 200, updatedAt: 200 }),
+    ];
+    const out = migrate({ threads }).threads;
+    const orderOf = (id) => out.find((t) => t.id === id).order;
+    assert.equal(orderOf('newest'), 0);
+    assert.equal(orderOf('middle'), 1);
+    assert.equal(orderOf('oldest'), 2);
+  });
+
+  it('a note with no updatedAt falls back to createdAt, exactly like the screen it is seeding for', () => {
+    const threads = [
+      item('has-createdAt-only', 'note', { createdAt: 100 }),
+      item('edited-more-recently', 'note', { createdAt: 50, updatedAt: 200 }),
+    ];
+    const out = migrate({ threads }).threads;
+    assert.equal(out.find((t) => t.id === 'edited-more-recently').order, 0);
+    assert.equal(out.find((t) => t.id === 'has-createdAt-only').order, 1);
+  });
+
+  it('notes and tasks are ranked separately: a task never gets an order, and is not counted against the notes', () => {
+    const threads = [item('task1', 'dump'), item('note1', 'note'), item('task2', 'axis'), item('note2', 'note')];
+    const out = migrate({ threads }).threads;
+    assert.ok(!('order' in out.find((t) => t.id === 'task1')));
+    assert.ok(!('order' in out.find((t) => t.id === 'task2')));
+    assert.deepEqual([out.find((t) => t.id === 'note1').order, out.find((t) => t.id === 'note2').order].sort(), [0, 1]);
+  });
+
+  it('if every note already has a finite order, none of them are touched — including a manual, non-time-based one', () => {
+    const threads = [
+      item('a', 'note', { createdAt: 500, order: 2 }), // deliberately NOT what newest-first would pick
+      item('b', 'note', { createdAt: 100, order: 0 }),
+      item('c', 'note', { createdAt: 300, order: 1 }),
+    ];
+    assert.deepEqual(migrate({ threads }).threads, threads);
+  });
+
+  it('if even one note lacks an order, the WHOLE group is renumbered by time (a state this app never produces itself)', () => {
+    const threads = [
+      item('has-one', 'note', { createdAt: 100, order: 99 }), // its old manual position is not preserved
+      item('lacks-one', 'note', { createdAt: 200 }),
+    ];
+    const out = migrate({ threads }).threads;
+    assert.equal(out.find((t) => t.id === 'lacks-one').order, 0); // newer, so first
+    assert.equal(out.find((t) => t.id === 'has-one').order, 1);
+  });
+
+  it('a non-finite order (NaN, a string, Infinity) counts as no order at all', () => {
+    for (const bad of [NaN, '3', Infinity, -Infinity, null]) {
+      const threads = [item('a', 'note', { order: bad })];
+      assert.equal(migrate({ threads }).threads[0].order, 0, JSON.stringify(bad));
+    }
+  });
+
+  it('is idempotent on its own: migrating an already-seeded notes group changes nothing', () => {
+    const threads = [item('a', 'note', { createdAt: 100 }), item('b', 'note', { createdAt: 200 })];
+    const once = migrate({ threads }).threads;
+    assert.deepEqual(migrate({ threads: once }).threads, once);
+  });
+
+  it('touches only the `order` field: every other field on a note survives untouched', () => {
+    const threads = [item('a', 'note', { body: 'text', linkTitle: 'A Title', updatedAt: 42, futureField: { x: 1 } })];
+    const out = migrate({ threads }).threads[0];
+    assert.equal(out.body, 'text');
+    assert.equal(out.linkTitle, 'A Title');
+    assert.equal(out.updatedAt, 42);
+    assert.deepEqual(out.futureField, { x: 1 });
+    assert.equal(out.order, 0);
   });
 });
 
@@ -356,7 +438,7 @@ describe('migrate: version', () => {
     });
   }
 
-  it('a newer file that is otherwise valid comes back as an identical copy', () => {
+  it('a newer file that is otherwise valid comes back as an identical copy, except its unordered note gains an order', () => {
     const newer = {
       version: 3,
       threads: [item('a', 'done', { doneAt: 5, aiSummary: 'x' }), item('n', 'note', { tags: ['t'] })],
@@ -366,7 +448,7 @@ describe('migrate: version', () => {
       tags: ['a', 'b'],
     };
     const out = migrate(newer);
-    assert.deepEqual(out, newer);
+    assert.deepEqual(out, { ...newer, threads: [newer.threads[0], { ...newer.threads[1], order: 0 }] });
     assert.notEqual(out, newer);
   });
 
@@ -584,8 +666,22 @@ describe('migrate: properties over many generated states', () => {
       assert.ok(Array.isArray(out.history) && out.history.every(isPlain), note);
 
       if (isPlain(input) && Array.isArray(input.threads)) {
-        // ...that lost no user data: every plain-object entry, unchanged, in order.
-        assert.deepEqual(out.threads, input.threads.filter(isPlain), note);
+        const plainInput = input.threads.filter(isPlain);
+        // ...that lost no user data: every plain-object entry, unchanged, in the same position, in every
+        // field EXCEPT a note's `order` (seedNoteOrder — none of this generator's items ever start with
+        // one, so every note here gets freshly numbered; a dedicated test below covers "already has one").
+        assert.equal(out.threads.length, plainInput.length, note);
+        out.threads.forEach((outItem, i) => {
+          const inItem = plainInput[i];
+          const { order: outOrder, ...outRest } = outItem;
+          const { order: inOrder, ...inRest } = inItem;
+          assert.deepEqual(outRest, inRest, `${note}: item ${i} changed a field other than order`);
+          if (inItem.status !== 'note') assert.equal(outOrder, inOrder, `${note}: item ${i} is not a note but its order changed`);
+        });
+        // Whatever the notes' new order values are, together they are exactly 0..n-1: no gaps, no
+        // duplicates (true here because this generator never gives a note a starting order — see above).
+        const noteOrders = out.threads.filter((t) => t.status === 'note').map((t) => t.order).sort((a, b) => a - b);
+        assert.deepEqual(noteOrders, noteOrders.map((_, i) => i), note);
         // A newer app's version is never lowered.
         if (Number.isFinite(input.version) && input.version > 2) assert.equal(out.version, input.version, note);
       } else {
