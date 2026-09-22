@@ -167,6 +167,7 @@ function pageDriver() {
       noteInput: { value: $('#noteInput').value, placeholder: $('#noteInput').placeholder },
       notes: $$('#noteList .task-row').map(describe),
       notesEmpty: $('#noteList .notes-empty') ? $('#noteList .notes-empty').textContent : null,
+      credit: $('.credit') ? $('.credit').textContent : null,
       menu: { open: $('#rowMenu').style.display === 'block', items: $$('#rowMenu button').map((b) => b.textContent) },
     };
   }
@@ -375,6 +376,10 @@ app.whenReady().then(async () => {
   s = await until((x) => x.panelOpen && x.panelDisplay === 'block');
   if (!check('the panel opens', !!s, why(s))) return finish();
   check('the page counts as focused (the focus checks below need it)', s.hasFocus);
+
+  s = await act('click', '#gearBtn');
+  check('the ⚙ screen carries a credit line', s.credit === 'Blob — made by SRK');
+  await act('click', '#backBtn');
 
   // ---- 4a: the expander ------------------------------------------------------------------------
   expectEq('every row has an expander; only the row with a body has it lit',

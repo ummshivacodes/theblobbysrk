@@ -195,6 +195,9 @@ it is not a thing (only `app.js` constructs and wires it, exactly like the rende
 ## 10. Progress log
 
 **2026-09-22**
+- **Phase A done:** the `.credit` line in the ⚙ screen (`styles/credit.css`, its own tiny file — not `style.css`,
+  which stays the original screen's styles, and not `notes.css`, which isn't what this is either). One check
+  added to `test/app/notes.electron.js`.
 - **Phase B done** (branch `notes-reorder`): `naturalOrder.js` extracted from `selectors.js` (no-behaviour-change,
   confirmed by the existing selectors/migrate tests passing unchanged before any new behaviour was added);
   `migrate.js`'s `seedNoteOrder` backfill; `selectors.js`'s `notes()` sorts by manual order with a

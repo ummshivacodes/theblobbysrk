@@ -1,0 +1,3 @@
+/* One line of static branding in the ⚙ screen, under Settings. Its own tiny file, not style.css or
+   notes.css: it isn't part of either feature, and style.css stays the original screen's styles. */
+.credit { margin-top: 10px; font-size: 10px; text-align: center; opacity: 0.35; letter-spacing: 0.2px; }
