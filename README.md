@@ -115,8 +115,9 @@ npm start
 - **⚙ (left of – and ×)** flips the panel to a second screen: the big
   crossed-off count, every task ever closed (kept in `threads.json` under
   `history`, so it survives deleting the row; reopening removes it), and
-  Settings — currently just Launch at login. Esc or "← back" returns;
-  collapsing the panel always lands back on the main screen.
+  Settings — currently just Launch at login, with a small "Blob — made by
+  SRK" credit under it. Esc or "← back" returns; collapsing the panel always
+  lands back on the main screen.
 
 Change the hotkey by editing `HOTKEY` at the top of `main.js`.
 
