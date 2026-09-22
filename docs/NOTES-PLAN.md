@@ -551,7 +551,7 @@ chasing flakes that were the machine, not the code)
 the owner wants from section 8 (markdown mirror, tags/brain map, sync, phone app) or section 10's remaining
 known issues, none of which block anything already shipped.
 
-**2026-09-22, axis/focus fixes (branch `axis-focus-fix`, off `main`, not yet merged)**
+**2026-09-22, axis/focus fixes (branch `axis-focus-fix`, off `main`, reviewed, not yet merged)**
 Three related fixes, requested by the owner in one pass: `dispatchToAxis` now focuses the thread it pushes
 (clearing whatever was focused before — the same clear-then-set `toggleFocus` already did); the blob's
 tooltip puts the focused thread first, marked (`▸ label · rest`), instead of a flat alphabetical-by-axis-order
@@ -560,3 +560,14 @@ region derived from `AX`, on both `raise` and `groove` — the fix is the region
 unchanged). `test/app/focus.electron.js` + `npm run test:focus` covers all three; `test/app/ui.electron.js`
 (Phase 0) confirmed unchanged and green — the new focus-on-push behaviour never collides with anything it
 already checks, since nothing there inspects focus state around a push. One new unit test for `dispatchToAxis`.
+
+A fresh-eyes audit before merging (the same practice used for Phase 4/5 and the reorder work) found two real,
+fixed issues. `itemStore.test.mjs`'s `liveThroughToDone()` fixture had a now-redundant `toggleFocus` call left
+over from before `dispatchToAxis` auto-focused — it un-focused what the push had just focused, so the test's
+final "ends done, unfocused" assertion still passed, but for the wrong reason (an accidental toggle-cancel,
+not `resolveThread`'s own completion clearing it, which is what the test claims and is meant to prove).
+Removed the call; a mutation check confirms the test now genuinely catches a regression in `resolveThread`'s
+own focus-clearing. And `axisView.js`'s `groove` filter region relied on the literal `10` inset matching the
+SAME literal `10` in `ensureBase()`'s own line coordinates — safe today, but two independent numbers that
+happened to cancel out, one edit away from silently reintroducing the exact clipped-bar bug this pass just
+fixed. Given a name (`AX.inset`) and read from one place by both.
