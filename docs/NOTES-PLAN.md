@@ -1,6 +1,6 @@
 # Blob → on-the-go note taker: implementation plan
 
-Status: **in progress: see section 11 (progress log) for exactly how far it got.** Written 2026-09-21
+Status: **Phases 0-5 all done and shipped. See section 11 for exactly how it went.** Written 2026-09-21
 as a handoff: whoever implements this (any model, any session) should be able to work from this file alone.
 
 Out of scope, on purpose: phone app, brain map, markdown export, sync, tags. They are deferred,
@@ -527,3 +527,27 @@ chasing flakes that were the machine, not the code)
 9. **Don't loop.** Run each Electron test once, twice at most. A failure that changes from run to run is the environment: get
    one trace (log `focus()`/`blur()` call stacks, textarea removals, main-process show/hide events), find the cause, fix it
    once, and stop. Each run puts a window on the owner's screen.
+
+**2026-09-22, Phase 5 (ship)**
+- README gained "How to add a feature" (which layer, which files, in what order, ending at `npm run verify`).
+- A fresh agent audited the merged tree, read-only, against sections 3-5 before installing (the plan's own
+  gate). Verdict: no real violations of the dependency rules, contracts or UI spec. Two stale illustrative
+  examples in section 3 fixed; one finding logged in section 10 (a rename ending can repaint from a stale
+  cached snapshot for one macrotask if another row mutates mid-rename — traced by hand, not reproduced live,
+  self-correcting, not a lost click or bad data, deliberately not chased in the same run as installing); one
+  passing gap in R12's own test coverage (`self.*` unmatched) noted as a comment.
+- `npm run build` → `scripts/verify-packaged.sh` (once): all three Electron suites green against the packaged
+  `.asar` — including the two hide/show checks that had failed on a locked screen during the pre-merge verify,
+  now passing, confirming that was the screen lock and not a regression.
+- `threads.json` (26 threads, 13 done) backed up byte-identical (hash-verified) to
+  `threads.pre-phase5-backup-2026-09-22_124129.json` before touching anything live.
+- The live Blob (pid 69363, the 2026-09-19 build) was quit with SIGTERM — its verified clean-quit path — and
+  exited within a second. The old `/Applications/Blob.app` was replaced with the build just verified (asar
+  hash-matched between `dist/` and the installed copy, so what shipped is exactly what was tested). Relaunched
+  (pid 32256): still running after a few seconds, and `threads.json`'s hash and shape (26/13/13) are unchanged
+  from immediately before the quit — nothing was lost or silently migrated by merely loading.
+- Blob Workbench refreshed to match `HEAD` exactly (verified: its file list equals `git ls-files`).
+
+**Phase 4 and Phase 5 are complete. The notes UI is live in `/Applications/Blob.app`.** What's next is whatever
+the owner wants from section 8 (markdown mirror, tags/brain map, sync, phone app) or section 10's remaining
+known issues, none of which block anything already shipped.
