@@ -386,8 +386,7 @@ Each has a natural home; none blocks the notes work.
 |---|---|---|
 | **Hide → show within milliseconds leaves the panel "open" but hidden.** `win.hide()` flips `isVisible()` at once but Electron's `hide` event reaches the page slightly later, so a mashed hotkey can reorder "collapse" and "open". A human takes seconds, so normal use is fine. | Phase 0 UI test (it failed twice, differently, until it waited for the page to process the hide) | `main/window.js` (send the events with a sequence number) or `ui/panel.js` (ignore a stale collapse) |
 | **`resolveThread` has no status guard** (only the UI's call sites gate it), so a double call counts the point twice; **deleting a thread mid-resolve** still completes it; **quitting mid-resolve** reloads it stuck as `resolving` forever; `loadState` trusts the file (stats without `done` become NaN after one completion). | The store test port (lane E reproduced each in memory) | Phase 3: see the list under section 4 |
-| **Axis bars render as thin white lines** instead of the intended coloured pins: the `raise`/`groove` SVG filters use the default objectBoundingBox on zero-width/height lines, so the coloured bar is clipped to nothing. Fix is `filterUnits="userSpaceOnUse"` with explicit regions. Owner hasn't decided (thick bars are busier). | Screenshots on 2026-09-19 | `views/axisView.js`, on the owner's say-so |
-| **Axis labels overlap** once about five threads are open (the axis is a fixed 300 units wide). Idea: label only the hovered/focused bar. | Same | `views/axisView.js` |
+| **Axis labels overlap** once about five threads are open (the axis is a fixed 300 units wide). Idea: label only the hovered/focused bar. | Screenshots on 2026-09-19 | `views/axisView.js` |
 | **Ids can collide** if two items are created in the same millisecond (`Date.now().toString(36)`). Unreachable by typing; matters if a paste ever creates several items at once. | Reading `itemStore.addTask` while porting | `core/itemStore.js`: add a counter or random suffix, with a test |
 | **`Esc` with the right-click menu open also collapses the panel** (both handlers fire). | Writing the UI test (deliberately not asserted) | `ui/app.js` |
 | **A rename ending can repaint from a stale cached snapshot for one macrotask.** `inboxView`/`notesView`'s `endRename` (and the other UI-local handlers: `toggleExpand`, `startRetag`, `startRename`) call their own local `redraw()` synchronously, using `last.snapshot` — the last one `app.js` handed them. If a *different* row's action fires a store mutation while this editor still has focus (the render gate holds that redraw back, by design), then the editor ends (blur), `redraw()` repaints the whole list from the now-stale `last.snapshot`, and the OTHER row briefly shows its pre-mutation state. The real `drawAll()` (already `gate.pending()`) fires very shortly after (same handful of queued `setTimeout(0)`s) and corrects it — traced by hand through the actual event/macrotask order, not reproduced live. The store's state is never wrong and no click is lost (unlike the 4a bugs this class of mechanism was built to catch); at worst it is a momentary flash on a row other than the one being renamed. Not confirmed to be visible in practice; not blocking Phase 5. | Phase 5 reviewer-agent audit, 2026-09-22 | `views/inboxView.js` / `views/notesView.js`: have `redraw()` do nothing when `gate.pending()` is already true (needs threading a `hasPendingRedraw()` accessor from `app.js` into both views' actions, and a new Electron test that renames one row and clicks a mutating action on another mid-rename) |
@@ -560,3 +559,24 @@ chasing flakes that were the machine, not the code)
 **Phase 4 and Phase 5 are complete. The notes UI is live in `/Applications/Blob.app`.** What's next is whatever
 the owner wants from section 8 (markdown mirror, tags/brain map, sync, phone app) or section 10's remaining
 known issues, none of which block anything already shipped.
+
+**2026-09-22, axis/focus fixes (branch `axis-focus-fix`, reviewed and merged into `main`)**
+Three related fixes, requested by the owner in one pass: `dispatchToAxis` now focuses the thread it pushes
+(clearing whatever was focused before — the same clear-then-set `toggleFocus` already did); the blob's
+tooltip puts the focused thread first, marked (`▸ label · rest`), instead of a flat alphabetical-by-axis-order
+list; and the known axis-bar filter bug above is fixed (`filterUnits="userSpaceOnUse"` with an explicit
+region derived from `AX`, on both `raise` and `groove` — the fix is the region, the shadow values are
+unchanged). `test/app/focus.electron.js` + `npm run test:focus` covers all three; `test/app/ui.electron.js`
+(Phase 0) confirmed unchanged and green — the new focus-on-push behaviour never collides with anything it
+already checks, since nothing there inspects focus state around a push. One new unit test for `dispatchToAxis`.
+
+A fresh-eyes audit before merging (the same practice used for Phase 4/5 and the reorder work) found two real,
+fixed issues. `itemStore.test.mjs`'s `liveThroughToDone()` fixture had a now-redundant `toggleFocus` call left
+over from before `dispatchToAxis` auto-focused — it un-focused what the push had just focused, so the test's
+final "ends done, unfocused" assertion still passed, but for the wrong reason (an accidental toggle-cancel,
+not `resolveThread`'s own completion clearing it, which is what the test claims and is meant to prove).
+Removed the call; a mutation check confirms the test now genuinely catches a regression in `resolveThread`'s
+own focus-clearing. And `axisView.js`'s `groove` filter region relied on the literal `10` inset matching the
+SAME literal `10` in `ensureBase()`'s own line coordinates — safe today, but two independent numbers that
+happened to cancel out, one edit away from silently reintroducing the exact clipped-bar bug this pass just
+fixed. Given a name (`AX.inset`) and read from one place by both.

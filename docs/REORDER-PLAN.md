@@ -1,6 +1,6 @@
 # Blob: a credit line + drag-to-reorder — implementation plan
 
-Status: **all three phases (A, B, C) done and committed. The credit line and drag-to-reorder are both live on branch `notes-reorder`, not yet merged into `main`.**
+Status: **all three phases (A, B, C) done, reviewed and merged into `main`.** The credit line and drag-to-reorder are both live.
 Written 2026-09-22, after Phase 5 (the notes UI) shipped. Two independent, differently-sized asks:
 
 1. A one-line credit in the panel: **"Blob — made by SRK."** Presentational only; no plan needed
@@ -250,5 +250,6 @@ it is not a thing (only `app.js` constructs and wires it, exactly like the rende
     is undisturbed — still marked dragging — at the moment of the collision, and that both changes land correctly
     once it resolves), and hiding the window mid-drag (checks the drag is cancelled, not stuck, and that a fresh drag
     afterwards still works — nothing about the gate stayed "held").
-- **Not merged into `main` yet.** `npm run verify` green throughout (1,108 unit tests; all four Electron suites).
+- **Merged into `main`**, alongside the independent `axis-focus-fix` branch (see `docs/NOTES-PLAN.md`'s progress
+  log for that one). `npm run verify` green on the fully merged tree: 1,109 unit tests, all five Electron suites.
 

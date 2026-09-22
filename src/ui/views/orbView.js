@@ -29,9 +29,16 @@ export function createOrbView({ bar }, actions) {
     }
 
     const score = `${active.length} active · ${snapshot.stats.done}/${snapshot.stats.listed} done`;
+    // The focused thread, if there is one, leads the list and carries a marker — the tooltip should say
+    // what you're on right now the same way the gold ring already shows it, not bury it alphabetically.
+    const labels = active.map((t) => displayTitle(t).label);
+    const focusedAt = active.findIndex((t) => t.focused);
+    const ordered = focusedAt === -1
+      ? labels
+      : [`▸ ${labels[focusedAt]}`, ...labels.filter((_, i) => i !== focusedAt)];
     const tip = active.length === 0
       ? score
-      : `${score}  —  ${active.map((t) => displayTitle(t).label).join(' · ')}`;
+      : `${score}  —  ${ordered.join(' · ')}`;
     blob.addEventListener('mouseenter', () => actions.showTooltip(blob, tip));
     blob.addEventListener('mouseleave', () => actions.hideTooltip());
     blob.addEventListener('click', (e) => {

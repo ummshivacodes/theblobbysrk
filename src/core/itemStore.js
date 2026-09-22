@@ -122,11 +122,15 @@ export function createItemStore(persistence, onChange, { onSaveError = () => {} 
   }
 
   // Dump → axis. Any tagged thread can be pushed over at any quad: the tag only ever set order. An
-  // untagged one can't (it has no order yet).
+  // untagged one can't (it has no order yet). Pushing a thread onto the axis is the moment it becomes
+  // what you're on right now, so it takes focus (same clear-then-set as toggleFocus below), whatever
+  // was focused before.
   function dispatchToAxis(id) {
     const t = find(id);
     if (!t || t.status !== 'dump' || t.quad == null) return;
     t.status = 'axis';
+    state.threads.forEach((x) => { delete x.focused; });
+    t.focused = true;
     commit();
   }
 

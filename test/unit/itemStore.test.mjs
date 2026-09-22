@@ -253,6 +253,13 @@ describe('dispatchToAxis', () => {
     const ctx = await openStore([thread('t1', 'dump', { quad: null })]);
     assertNoOp(ctx, () => ctx.store.dispatchToAxis('t1'));
   });
+
+  it('focuses the thread it pushes, and un-focuses whatever was focused before: it is what you\'re on now', async () => {
+    const { store } = await openStore([thread('was-focused', 'axis', { focused: true }), thread('t1', 'dump', { quad: 2 })]);
+    store.dispatchToAxis('t1');
+    assert.equal(byId(store, 't1').focused, true);
+    assert.equal(byId(store, 'was-focused').focused, undefined);
+  });
 });
 
 describe('recallToDump', () => {
@@ -708,12 +715,14 @@ describe('the life of a task', () => {
   useFakeClock();
 
   // One task walked through every state with only the public API and the id addTask hands back.
+  // dispatchToAxis focuses it (the push IS the focus step here); no separate toggleFocus call — one
+  // used to be needed, and adding it back would immediately un-focus what the push just focused,
+  // passing the assertion below for the wrong reason (a reviewer audit caught exactly this, 2026-09-22).
   function liveThroughToDone() {
     const ctx = newStore();
     const id = ctx.store.addTask('ship it');
     ctx.store.tagTask(id, 2);
     ctx.store.dispatchToAxis(id);
-    ctx.store.toggleFocus(id);
     ctx.store.resolveThread(id);
     mock.timers.tick(RESOLVE_MS);
     return { ...ctx, id };
