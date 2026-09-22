@@ -4,10 +4,14 @@ import { createOpenBodies, isEditingIn } from './bodyEditor.js';
 import { buildRow } from './itemRow.js';
 import { createRename } from './titleEditor.js';
 
-// The Notes screen: a search box over the notes, newest edit first. A note is a row like any other (open
-// it with ▸ or by clicking its title, to read or edit its body) with two differences: no tag (a note is
-// never on the axis) and a ↩ that sends it back to the task dump.
+// The Notes screen: a search box over the notes, newest edit first (or however you last dragged them —
+// see the `reorderable` row option below; the actual drag mechanics are ui/dragList.js, owned by
+// app.js like every other cross-cutting gesture controller, not imported here). A note is a row like any
+// other (open it with ▸ or by clicking its title, to read or edit its body) with two differences: no tag
+// (a note is never on the axis) and a ↩ that sends it back to the task dump.
 // It owns the UI state that must not live on the data: the search text and which notes are open.
+// Dragging is turned off while a search is showing (see render): reordering a filtered subset doesn't
+// have a clear meaning, since most of the group isn't even on screen to drag past.
 //   els = { search, list, count }
 //   actions = { unfile, remove, setBody, openLink, rename, openMenu(x, y, entries) }
 const clip = (text) => (text.length > 24 ? `${text.slice(0, 23)}…` : text);
@@ -65,6 +69,7 @@ export function createNotesView({ search, list, count }, actions) {
         expanded: openBodies.isOpen(note.id),
         autofocusBody: note.id === autofocus,
         renaming: renaming.isRenaming(note.id),
+        reorderable: !searching,
         handlers,
       }));
     });

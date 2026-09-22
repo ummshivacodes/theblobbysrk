@@ -139,3 +139,18 @@
   border: 1px solid var(--note); background: rgba(255, 255, 255, 0.08);
   color: #fff; font: inherit;
 }
+
+/* ---------- Drag-to-reorder (Notes screen only) ---------- */
+.drag-handle {
+  flex: none; width: 18px; height: 18px; margin-left: 2px; padding: 0;
+  border: none; border-radius: 4px; background: transparent;
+  color: rgba(255, 255, 255, 0.28); font-size: 12px; line-height: 18px; cursor: grab;
+  opacity: 0; transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+.task-row:hover .drag-handle { opacity: 1; }
+.drag-handle:hover { color: rgba(255, 255, 255, 0.75); background: rgba(255, 255, 255, 0.08); }
+.task-row.dragging {
+  opacity: 0.9; background: rgba(185, 168, 255, 0.1);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.35); position: relative; z-index: 2;
+}
+.task-row.dragging .drag-handle { opacity: 1; color: var(--note); cursor: grabbing; }

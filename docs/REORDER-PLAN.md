@@ -1,6 +1,6 @@
 # Blob: a credit line + drag-to-reorder — implementation plan
 
-Status: **in progress — Phase B done. Owner said "go ahead, notes only"; scoped down from both lists to the Notes list.**
+Status: **all three phases (A, B, C) done and committed. The credit line and drag-to-reorder are both live on branch `notes-reorder`, not yet merged into `main`.**
 Written 2026-09-22, after Phase 5 (the notes UI) shipped. Two independent, differently-sized asks:
 
 1. A one-line credit in the panel: **"Blob — made by SRK."** Presentational only; no plan needed
@@ -207,5 +207,24 @@ it is not a thing (only `app.js` constructs and wires it, exactly like the rende
   the list, and `order` is a known field). Corrected while implementing: a new note lands at the TOP of the
   group (matching what "newest edited first" always did for a fresh note), not the bottom — the plan's first
   draft got this backwards by copying the (unbuilt) inbox list's convention; see §2.
-- **Next: Phase C, the drag UI itself** (`dragList.js`, the handle, wiring into `notesView.js` only).
+- **Phase C done: the drag UI.** `src/ui/dragList.js` — plain pointer events (pointerdown/move/up/cancel), not the
+  browser's native drag-and-drop, so it shares the render gate and press guard instead of running a second gesture
+  system beside them. It is constructed and owned by `app.js`, watching the Notes list's container directly — NOT
+  imported by `notesView.js`. The first attempt had it the other way round, and the architecture test's R2 rule
+  (views may import only the allow-listed files) correctly rejected it: `dragList` is cross-cutting app machinery
+  like `panel`/`renderGate`/`pressGuard`, not a view's own sibling module like `bodyEditor`/`titleEditor`. The gate's
+  5 s click-safety cap (§1/§4) does NOT protect a drag — `noteDrag.isDragging()` is a separate, uncapped signal, and
+  the test holds a drag open for 5.6 s to prove it. `test/app/reorder.electron.js` + `npm run test:reorder`, threaded
+  into `verify`/`verify:packaged`. Building the test surfaced a real, general testing gotcha, now in
+  `docs/NOTES-PLAN.md` §11 point 10 (a `getBoundingClientRect()` read racing Chromium's own layout pass right after
+  something else changed the DOM) — not a bug in the app, but worth any future test knowing about.
+- **Not done, deliberately: the "rename can repaint from a stale snapshot" question from the Phase 5 review.** The
+  SAME class of local-`redraw()`-bypasses-the-gate mechanism exists here too (`toggleExpand`/`startRename`/
+  `endRename` in `notesView.js`), but a real single-pointer drag cannot coincide with a click on a DIFFERENT row's
+  button (the mouse is captured by the drag handle) the way the earlier finding's scenario needed two clicks in
+  quick succession — so this is even less reachable than that one, and was not chased for the same reason: fixing
+  it needs a real scenario to test against, and none exists here.
+- **Not merged into `main` yet.** `npm run verify` is green (1,108 unit tests; all four Electron suites). Whoever
+  merges this should run the same read-only reviewer-agent audit Phase 5 used before merging Phase 4, since nobody
+  has looked at this tree with fresh eyes yet.
 
