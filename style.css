@@ -5,10 +5,9 @@ html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
 body { display: flex; justify-content: flex-end; align-items: flex-start; }
 
 :root {
-  --q1: #e15656;
-  --q2: #4a86e8;
-  --q3: #e0b23e;
-  --q4: #9aa0a8;
+  /* Quad colour lives in src/ui/theme.js, not here: these four were a leftover duplicate that
+     nothing actually read (checked: no var(--q1..4) anywhere), so they're gone rather than kept
+     in sync by hand. */
   --gold: #f2c14e;
   --panel-w: 320px;
   --shell-pad-x: 14px;
@@ -133,6 +132,7 @@ body { display: flex; justify-content: flex-end; align-items: flex-start; }
   margin-bottom: 8px;
 }
 .title { font-weight: 600; font-size: 13px; letter-spacing: 0.3px; }
+.title-sub { font-weight: 400; font-size: 10px; opacity: 0.5; letter-spacing: 0; }
 .hotkey-hint { font-size: 11px; opacity: 0.5; }
 .win-actions { -webkit-app-region: no-drag; display: flex; gap: 4px; }
 .icon-btn {
@@ -168,6 +168,23 @@ body { display: flex; justify-content: flex-end; align-items: flex-start; }
 @keyframes bar-pop {
   from { transform: translateY(20px); opacity: 0; }
   to   { transform: none; opacity: 1; }
+}
+/* Q1 only: a steady glow (chained onto the existing shadow, same trick as .hovered below) rather than
+   a fourth hue — see theme.js. It's not lit while the panel is collapsed (the SVG isn't even visible
+   then), so it's not the kind of always-on glow that fades into wallpaper. .q1.hovered needs its own
+   rule: the plain .hovered rule above would otherwise win on specificity and drop the glow. */
+.bar-g.q1 .bar { filter: url(#raise) drop-shadow(0 0 6px hsl(28, 100%, 54%)); }
+.bar-g.q1.hovered .bar { stroke-width: 7; filter: url(#raise) brightness(1.25) drop-shadow(0 0 7px hsl(28, 100%, 60%)); }
+/* A brief extra pulse layered onto the arrival pop, only for a Q1 bar arriving — the one moment
+   worth a motion grab, since motion beats colour or brightness for pulling the eye. Its own keyframes
+   rather than a second animation alongside bar-pop: two animations both touching opacity would just
+   fight over which one wins each frame. */
+.bar-g.fresh.q1 .bar { animation: bar-pop-q1 0.6s cubic-bezier(0.2, 0.8, 0.2, 1); }
+@keyframes bar-pop-q1 {
+  0%   { transform: translateY(20px); opacity: 0; }
+  55%  { transform: none; opacity: 1; }
+  75%  { opacity: 0.55; }
+  100% { opacity: 1; }
 }
 
 /* ---------- Row context menu ---------- */
@@ -217,7 +234,7 @@ body { display: flex; justify-content: flex-end; align-items: flex-start; }
   min-width: 26px; padding: 1px 6px; border-radius: 4px; border: none;
   font-size: 10px; font-weight: 700; cursor: pointer; background: var(--c); color: #fff;
 }
-.tag-chip.q3 { color: #222; }
+.tag-chip.q1 { color: #222; } /* Q1's now the brightest chip; everything else still reads fine in white */
 .task-act {
   width: 20px; height: 18px; border-radius: 4px; border: none; padding: 0;
   font-size: 11px; cursor: pointer; background: rgba(255, 255, 255, 0.08); color: #ddd;

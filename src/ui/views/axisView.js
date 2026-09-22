@@ -74,6 +74,7 @@ export function createAxisView({ svg, count }, actions) {
     g.innerHTML = '';
     g.setAttribute('class',
       'bar-g' +
+      (t.quad === 1 ? ' q1' : '') + // the one quad that gets a glow + entry pulse; see style.css
       (t.id === hoveredId ? ' hovered' : '') +
       (t.focused ? ' focused' : '') +
       (t.status === 'resolving' ? ' resolving' : ''));

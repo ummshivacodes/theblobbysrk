@@ -13,7 +13,7 @@ function createTray({ Tray, Menu, nativeImage, iconPath, hotkeyLabel, onShow, on
   const icon = nativeImage.createFromPath(iconPath);
   icon.setTemplateImage(true);
   const tray = new Tray(icon);
-  tray.setToolTip('Blob');
+  tray.setToolTip('Blob — by SRK'); // a native OS tooltip: plain text only, no smaller "by SRK" possible here
 
   // The handlers are wrapped so Electron's event arguments never reach them.
   const menu = Menu.buildFromTemplate([

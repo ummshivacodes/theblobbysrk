@@ -13,7 +13,7 @@ const { bootIsolatedApp } = require('../../scripts/lib/isolatedApp.js');
 const { waitFor, createReporter } = require('./harness.js');
 
 const T = 1700000000000;
-const COLOR = { 1: '#e15656', 2: '#4a86e8', 3: '#e0b23e' };
+const COLOR = { 1: 'hsl(28, 100%, 54%)', 2: 'hsl(28, 68%, 40%)', 3: 'hsl(28, 45%, 27%)' };
 const NEW = 'a brand new thought';
 
 // One item of every status that can be saved (`resolving` only exists for 700 ms, so it is caught live).
@@ -75,7 +75,7 @@ function pageDriver() {
       })),
       bars: $$('#axisSvg g.bar-g').map((g) => ({
         id: g.dataset.id,
-        cls: cls(g, ['bar-g', 'fresh']),
+        cls: cls(g, ['bar-g', 'fresh', 'q1']), // q1 is quad identity, permanent for a Q1 bar — not a state like hovered/focused
         color: $('.bar', g).getAttribute('stroke'),
         strike: !!$('.strike', g),
         halo: !!$('.halo', g),

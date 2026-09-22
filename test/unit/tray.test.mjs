@@ -51,7 +51,7 @@ function setup(overrides = {}) {
 }
 
 describe('createTray', () => {
-  test('builds the icon from the given path, as a template image, and titles the tray "Blob"', () => {
+  test('builds the icon from the given path, as a template image, and titles the tray "Blob — by SRK"', () => {
     const { tray, record } = setup();
     assert.equal(record.images.length, 1);
     assert.equal(record.images[0].path, '/app/assets/blobTemplate.png');
@@ -59,7 +59,7 @@ describe('createTray', () => {
     assert.equal(record.trays.length, 1);
     assert.equal(tray, record.trays[0], 'the Tray is returned, for the caller to keep alive');
     assert.equal(tray.icon, record.images[0]);
-    assert.equal(tray.tooltip, 'Blob');
+    assert.equal(tray.tooltip, 'Blob — by SRK');
   });
 
   test('the menu has the same items, in the same order, as before', () => {
