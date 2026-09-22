@@ -252,6 +252,13 @@ describe('dispatchToAxis', () => {
     const ctx = await openStore([thread('t1', 'dump', { quad: null })]);
     assertNoOp(ctx, () => ctx.store.dispatchToAxis('t1'));
   });
+
+  it('focuses the thread it pushes, and un-focuses whatever was focused before: it is what you\'re on now', async () => {
+    const { store } = await openStore([thread('was-focused', 'axis', { focused: true }), thread('t1', 'dump', { quad: 2 })]);
+    store.dispatchToAxis('t1');
+    assert.equal(byId(store, 't1').focused, true);
+    assert.equal(byId(store, 'was-focused').focused, undefined);
+  });
 });
 
 describe('recallToDump', () => {

@@ -8,16 +8,40 @@ const AX = { w: 300, h: 120, baseline: 95, barHeight: 60 };
 
 // The two drop-shadow filters. Built with svgEl rather than innerHTML, so nothing in the UI ever
 // parses markup.
+//
+// Both are applied to a <line>: the bar itself is vertical (zero WIDTH), the baseline groove is
+// horizontal (zero HEIGHT). A filter's region defaults to `objectBoundingBox` — a percentage of the
+// filtered element's own bounding box — and a percentage of a zero-length side is still zero, so the
+// region collapsed to nothing and clipped the shadow (and the bar's own colour) down to a thin white
+// line. `userSpaceOnUse` with an explicit region, sized in the same coordinates the lines themselves
+// use, fixes it for both: the fix is the region, not the shadow values, which are unchanged.
 function buildDefs() {
   const defs = svgEl('defs');
-  const raise = svgEl('filter', { id: 'raise', x: '-50%', y: '-20%', width: '200%', height: '140%' });
+  const { baseline, barHeight, w } = AX;
+
+  // Comfortably wider than the stroke (4.5) and the blur (stdDeviation 1.6) on every side.
+  const RAISE_MARGIN = 15;
+  const raise = svgEl('filter', {
+    id: 'raise', filterUnits: 'userSpaceOnUse',
+    x: -RAISE_MARGIN, y: baseline - barHeight - RAISE_MARGIN,
+    width: RAISE_MARGIN * 2, height: barHeight + RAISE_MARGIN * 2,
+  });
   raise.appendChild(svgEl('feDropShadow', {
     dx: 0, dy: 1.5, stdDeviation: 1.6, 'flood-color': '#000', 'flood-opacity': 0.55,
   }));
-  const groove = svgEl('filter', { id: 'groove', x: '-5%', y: '-100%', width: '110%', height: '300%' });
+
+  // The groove's line runs from x=10 to x=w-10 at y=baseline; margin only needs to cover its own
+  // (smaller) blur.
+  const GROOVE_MARGIN = 10;
+  const groove = svgEl('filter', {
+    id: 'groove', filterUnits: 'userSpaceOnUse',
+    x: 10 - GROOVE_MARGIN, y: baseline - GROOVE_MARGIN,
+    width: w - 20 + GROOVE_MARGIN * 2, height: GROOVE_MARGIN * 2,
+  });
   groove.appendChild(svgEl('feDropShadow', {
     dx: 0, dy: 1, stdDeviation: 0.8, 'flood-color': '#000', 'flood-opacity': 0.5,
   }));
+
   defs.appendChild(raise);
   defs.appendChild(groove);
   return defs;

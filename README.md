@@ -57,11 +57,14 @@ npm start
   order (the paper's point). Tap the coloured chip any time, on a dump or
   an axis row, to retag.
 - **Tap →** on a tagged dump row to push it onto the axis (a bar and a
-  core in the blob). **Tap ←** on an axis row to recall it back to the
-  dump if you're not actually working it yet — same tag, same row, just
-  off the axis until pushed again.
+  core in the blob) — pushing it also focuses it (see below), the same
+  gold ring you'd get from clicking its text, since it's what you're on
+  now. **Tap ←** on an axis row to recall it back to the dump if you're
+  not actually working it yet — same tag, same row, just off the axis
+  until pushed again.
 - **Click a thread's text** to focus it: gold ring on the blob, its core,
-  its bar and its row. Click again to clear. One focus at a time.
+  its bar and its row. Click again to clear. One focus at a time. The
+  blob's tooltip leads with the focused thread (▸) ahead of the rest.
 - **Hover** a core, a bar or a row and the other two light up.
 - **Close a thread** by clicking its bar or its row's ✓. Its bar leaves
   the axis immediately — closed work never crowds it — and the other bars
@@ -287,6 +290,14 @@ ignores them). Both made timing checks fail at random. Input the test injects go
 straight to the page, so it is unaffected. Don't loop it: one run per change.
 
 ```
+npm run test:focus
+```
+Three related fixes to the axis/focus experience: pushing a task onto the axis focuses it, the blob's
+tooltip leads with the focused thread, and the axis bars' drop-shadow filters (see "Architecture" below)
+have a real region instead of a percentage of a zero-size bounding box. Its own file, not
+`test:ui`'s, since these are deliberate behaviour changes.
+
+```
 npm run test:app
 ```
 The Electron-level check for `main.js`. It boots the real main process, then
@@ -302,8 +313,8 @@ fixture data and their own profile (see
 run while Blob is open.
 
 ```
-npm run verify            # everything: unit + test:app + test:ui + test:notes
-npm run verify:packaged   # the three Electron tests against the code inside the BUILT app.asar
+npm run verify            # everything: unit + test:app + test:ui + test:notes + test:focus
+npm run verify:packaged   # the four Electron tests against the code inside the BUILT app.asar
 ```
 `verify:packaged` (after `npm run build`) is what catches a file missing from
 the package while `npm start` still works: run it before every install.
