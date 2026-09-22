@@ -182,6 +182,62 @@ Rules that keep it rebuildable:
   "Object has been destroyed". It also locks the page down so it can never
   navigate away or open another window — see the table above.
 
+## How to add a feature
+
+Work out which layer it belongs to before writing anything; that decides which
+files you touch and which tests you write first.
+
+- **A new state transition, or a rule about what data means** (a new status,
+  a new field, a new guard on an existing move) → `src/core/itemStore.js`,
+  plus its unit tests. Nothing else decides this: a view never sets `t.status`
+  or writes a field itself, it calls a store function and redraws from what
+  comes back. If the new field is derived from others (like `displayTitle`
+  reading `text` + `linkTitle`), it belongs in `src/core/selectors.js` instead
+  — a read-side view, not new state.
+- **A new pure rule with no state** (parsing input, deciding what counts as a
+  link, formatting a timestamp) → its own file in `src/core/` or a small
+  `src/ui/*.js` helper (see `capture.js`, `linkify.js`, `format.js`,
+  `captureBox.js`'s `interpretKey`). Write it so it takes plain arguments and
+  returns a plain value — no DOM, no store — and it can be unit-tested in
+  milliseconds with `node:test`.
+- **Something new on screen** → a view under `src/ui/views/`:
+  `createXView(elements, actions) → { render(snapshot, ui), applyHover?(id) }`.
+  It draws from the frozen snapshot it's handed and reports what the user did
+  through the `actions` it's given — nothing more. If it needs a new store
+  function, add that to `itemStore.js` first and wire it through `app.js`'s
+  `actions` object and the `pick(...)` list for that view; don't reach past
+  `app.js` to get it. If the view needs UI-only memory (which row is expanded,
+  what's typed in a search box), keep it local to the view, the way
+  `inboxView.js` keeps `openBodies`/`renaming` — never write it onto an item.
+- **A new IPC round-trip to the main process** (the renderer needs something
+  only Node/Electron can do) → add the call to `preload.js`'s
+  `window.threadAxis` object, register its channel in `main/ipc.js` (the one
+  place `ipcMain.*` is called), and add the real logic to a `main/` module
+  (or a new one under `main/lib/` if it's pure). Then add it to
+  `src/ui/bridge.js`, grouped with what it's for — `bridge.js` is the only
+  file in `src/` that may mention `window.threadAxis`. The architecture test
+  checks that every channel `preload.js` uses is registered in `ipc.js` and
+  vice versa, so a mismatch fails loudly rather than silently doing nothing.
+- **New styling** → add to `styles/notes.css` (or a new file under `styles/`,
+  loaded from `index.html` after `style.css`) rather than growing `style.css`;
+  it stays the original screen's styles.
+- **A brand-new module anywhere under `src/`, `main/` or `styles/`** → check
+  it's covered by a glob in `package.json`'s `build.files` (`src/**`,
+  `main/**`, `styles/**` already are, so a new *file* under an existing
+  directory needs nothing extra; a new *top-level* directory does). The
+  architecture test's packaging rule (R9) catches a miss here, but only if you
+  run it — `npm test` after adding a file, not just `npm start`, which reads
+  the source tree directly and would work even if the packaged app wouldn't.
+
+Whatever you add, run `npm run verify` before committing (it's fast except for
+the three Electron tests, which are still quick — call out any change to
+`test/app/ui.electron.js` explicitly, since that file is meant to characterize
+today's behaviour, not move with it). If the architecture test rejects
+something you believe is right, that's the design telling you the change
+belongs somewhere else, or the rule needs a deliberate, explained update — see
+the rule at the top of `test/unit/lib/architecture.mjs`'s `VIEW_ALLOWED_IMPORTS`
+for what "deliberate" looks like in practice.
+
 ## Tests
 ```
 npm test
