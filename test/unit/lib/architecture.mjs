@@ -661,6 +661,10 @@ function noCycles(ctx, report) {
 // R12 (renderer): modules keep their own state; nothing is planted on window or globalThis.
 // (Test-only globals are injected by the tests from outside.) Matches window.x = ..., window.a.b += ...,
 // window['x'] = ..., window.x++, and the function forms Object.assign(window, ...) / defineProperty.
+// Known gap, checked and left as-is (Phase 5 reviewer-agent audit, 2026-09-22): `self` is the same global
+// object as `window` in a renderer, but is not matched here. Nothing in src/ currently writes to `self.*`
+// (checked by hand), so this is a theoretical hole in the RULE, not a leak in the CODE; if it is ever
+// closed, add `self` beside `window`/`globalThis` in both regexes below.
 const GLOBAL_WRITE = new RegExp(
   '\\b(?:window|globalThis)(?:\\s*(?:\\?\\.|\\.)\\s*[\\w$]+|\\s*\\[[^\\]\\n]*\\])+'
   + '\\s*(?:(?:[-+*/%&|^]|\\*\\*|<<|>>>?|&&|\\|\\||\\?\\?)?=(?![=>])|\\+\\+|--)', 'g');
