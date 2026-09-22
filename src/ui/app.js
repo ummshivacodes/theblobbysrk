@@ -5,6 +5,7 @@
 import { createItemStore } from '../core/itemStore.js';
 import { createBridge } from './bridge.js';
 import { createCaptureBox } from './captureBox.js';
+import { createDragList, DRAG_ENDED } from './dragList.js';
 import { createHover } from './hover.js';
 import { createLinkTitles } from './linkTitles.js';
 import { createNotice, describeLoadNotice, SAVE_FAILED } from './notice.js';
@@ -51,9 +52,10 @@ const panel = createPanel({
   shell,
   panel: $('panel'),
   windowCtl: bridge.windowCtl,
-  // Mid-sentence: a body is being edited, or a box has something typed in it. (A box that merely has
-  // focus, empty, has nothing to lose: it must not keep the panel from folding.)
-  isTyping: () => editingBody() || typedIn.some((box) => document.activeElement === box && box.value.trim() !== ''),
+  // Mid-sentence, or mid-drag: a body is being edited, a note is being dragged, or a box has something
+  // typed in it. (A box that merely has focus, empty, has nothing to lose: it must not keep the panel
+  // from folding.)
+  isTyping: () => busy() || typedIn.some((box) => document.activeElement === box && box.value.trim() !== ''),
   onCollapse() {
     tooltip.hide();
     hover.set(null);
@@ -77,6 +79,7 @@ const actions = {
   setBody: (id, body) => store.setBody(id, body),
   fileNote: (id) => store.fileAsNote(id),
   unfile: (id) => store.unfileNote(id),
+  reorder: (orderedIds) => store.reorderItems(orderedIds),
   // A rename that made the title a link asks for that page's title too (as a capture does).
   rename: (id, text) => {
     store.setText(id, text);
@@ -116,10 +119,22 @@ const notes = createNotesView(
   pick(actions, ['unfile', 'remove', 'setBody', 'openLink', 'rename', 'openMenu']),
 );
 const notesBadge = createNotesBadgeView({ button: $('notesBtn'), count: $('notesCount') });
+// The Notes list's drag-to-reorder (see ui/dragList.js): a cross-cutting gesture controller, owned here
+// like panel/renderGate/pressGuard, watching the same DOM the view renders into rather than being handed
+// to the view — a view receives data and actions, not app-level machinery (see R2 in the architecture
+// test, which is exactly what caught this the first time it was tried the other way round).
+const noteDrag = createDragList({ container: $('noteList'), onReorder: actions.reorder });
+// The Notes list held its own repaint back while that drag was moving one of its rows (notesView.js's
+// redraw()); now it's safe.
+document.addEventListener(DRAG_ENDED, () => notes.flushIfPending());
 
 // Is a notes editor being typed in, on either list? And which boxes count as "typed in" when they have text.
 const editingBody = () => inbox.isEditing() || notes.isEditing();
 const typedIn = [input, $('noteInput'), $('notesSearch')];
+// Anything going on that a redraw, or the panel folding, must wait out — editing, or dragging a note to
+// reorder it. Not folded into editingBody itself: the press guard's mousedown-vs-blur question doesn't
+// apply to a drag (the handle isn't a text field competing with an editor for focus).
+const busy = () => editingBody() || noteDrag.isDragging();
 const score = createScoreView({ done: $('doneCount'), listed: $('listedCount'), active: $('activeCount') });
 const done = createDoneView(
   {
@@ -149,12 +164,19 @@ function drawAll() {
 
 // Nothing is redrawn under the user's hands: not while a mouse button is down (a redraw between
 // mouse-down and mouse-up swallows the click, and saving an edit on blur happens exactly then), and not
-// while they are typing in a body editor (it would destroy the text and the caret). The redraw waits
-// and happens once, at the end of the gesture. See ui/renderGate.js.
+// while they are typing in a body editor (it would destroy the text and the caret) or dragging a note
+// (a redraw would rebuild the very row being dragged out from under the drag). The redraw waits and
+// happens once, at the end of the gesture. See ui/renderGate.js.
+//
+// pointerHeld's cap is deliberately NOT what protects a drag: dragging is checked separately, via
+// notes.isDragging(), with no cap at all. The cap exists for a click that never reports its release (a
+// genuine "something went wrong"); a drag has its own definite end (pointerup/pointercancel/Esc) and can
+// legitimately run far longer than 5 s if someone drags slowly, so it must not be cut off by a safety net
+// built for a different failure.
 const POINTER_HOLD_MAX_MS = 5000; // a press that never reports its release must not freeze the page
 let pointerDownAt = 0;
 const pointerHeld = () => pointerDownAt > 0 && Date.now() - pointerDownAt < POINTER_HOLD_MAX_MS;
-const gate = createRenderGate({ draw: drawAll, isHeld: () => pointerHeld() || editingBody() });
+const gate = createRenderGate({ draw: drawAll, isHeld: () => pointerHeld() || busy() });
 
 // Any of these can be the end of a gesture: a held redraw may be due, and a postponed fold of the panel
 // (the mouse left while the user was typing). Both just ask again whether they are still held; the ones
@@ -225,7 +247,14 @@ bridge.lifecycle.onShown(() => {
   panel.open();
   setTimeout(() => input.focus(), 50);
 });
-bridge.lifecycle.onHidden(() => panel.close({ immediate: true }));
+bridge.lifecycle.onHidden(() => {
+  // Before anything else: a drag in progress ends right now, not whenever (if ever) the OS/Electron
+  // would otherwise tell the page its pointer stream was interrupted. Cancelling it first, rather than
+  // relying on that, also means the immediate collapse below — which blurs whatever has focus, ending a
+  // rename if one was open — never has a `.dragging` row to contend with in the first place.
+  noteDrag.cancel();
+  panel.close({ immediate: true });
+});
 
 // Escape: first step out of the ⚙ screen, then collapse the panel.
 document.addEventListener('keydown', (e) => {

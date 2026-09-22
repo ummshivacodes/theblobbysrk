@@ -2,9 +2,9 @@
 // given (each returns a fresh array, sorted stably) and that treat a state
 // without a usable `threads` list as empty rather than crashing a render.
 import { linkify } from './linkify.js';
+import { isNote, newestEditFirst } from './naturalOrder.js';
 
 const isItem = (t) => t !== null && typeof t === 'object' && !Array.isArray(t);
-const isNote = (t) => t.status === 'note';
 
 // filter() also gives every caller its own array, so sorting it in place below
 // can never reorder state.threads.
@@ -15,13 +15,18 @@ const items = (state) => (Array.isArray(state?.threads) ? state.threads.filter(i
 const time = (n) => (Number.isFinite(n) ? n : 0);
 const byCreatedAsc = (a, b) => time(a.createdAt) - time(b.createdAt);
 
-// When a note was last touched; notes made before updatedAt existed fall back
-// to the day they were created.
-const editedAt = (t) => (Number.isFinite(t.updatedAt) ? t.updatedAt : time(t.createdAt));
-// Plain < and > (not localeCompare) so the tie-break is the same on every machine.
-const byIdAsc = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
-const newestEditFirst = (a, b) =>
-  editedAt(b) - editedAt(a) || time(b.createdAt) - time(a.createdAt) || byIdAsc(a, b);
+// Manual order, once a note has one: lower sorts first. A note without one (there should never be one,
+// once migrate() has run — see naturalOrder.js) sorts after every note that does, and ties among those
+// fall back to today's rule so nothing is ever engine-defined.
+const orderOf = (t) => (Number.isFinite(t.order) ? t.order : null);
+function byManualOrder(a, b) {
+  const oa = orderOf(a);
+  const ob = orderOf(b);
+  if (oa !== null && ob !== null) return oa - ob;
+  if (oa !== null) return -1;
+  if (ob !== null) return 1;
+  return newestEditFirst(a, b);
+}
 
 // What the blob shows, and the only items the axis draws.
 export function activeThreads(state) {
@@ -37,9 +42,11 @@ export function inboxItems(state) {
     .sort(byCreatedAsc);
 }
 
-// The Notes screen: notes only, most recently edited first.
+// The Notes screen: notes only, in the order the owner put them in (drag-and-drop). Before a file has ever
+// been through migrate() with the reorder feature present, or for a note that somehow still lacks an
+// `order`, falls back to newest-edited-first — see byManualOrder.
 export function notes(state) {
-  return items(state).filter(isNote).sort(newestEditFirst);
+  return items(state).filter(isNote).sort(byManualOrder);
 }
 
 // Every word of the query must appear somewhere in a note's title, body or link

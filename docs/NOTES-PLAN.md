@@ -527,6 +527,15 @@ chasing flakes that were the machine, not the code)
 9. **Don't loop.** Run each Electron test once, twice at most. A failure that changes from run to run is the environment: get
    one trace (log `focus()`/`blur()` call stacks, textarea removals, main-process show/hide events), find the cause, fix it
    once, and stop. Each run puts a window on the owner's screen.
+10. **A `getBoundingClientRect()` read right after something else just changed the DOM can race Chromium's own layout
+    pass**, and it looks exactly like a dropped or mistimed event, not a stale measurement — found while testing drag-
+    and-drop (`docs/REORDER-PLAN.md`): typing into one row's textarea, then immediately reading a DIFFERENT row's rect
+    to aim a drag, intermittently produced a rect from before the layout had settled, so the drag's own logic (correct)
+    computed the wrong target from a stale position. Fixed generally, not just for that one call site: wrap the read in
+    `new Promise((resolve) => requestAnimationFrame(() => resolve(...)))` so the caller gets a rect from a settled frame.
+    A real (not synthetic) drag is worth testing with the pointer actually passing through each row it needs to decide
+    between, not jumping straight to the final point, for the same reason — the algorithm has to see what a hand on a
+    mouse would actually produce, not the answer already computed.
 
 **2026-09-22, Phase 5 (ship)**
 - README gained "How to add a feature" (which layer, which files, in what order, ending at `npm run verify`).

@@ -9,9 +9,10 @@
     "test:app": "electron test/app/lifecycle.electron.js",
     "test:ui": "electron test/app/ui.electron.js",
     "test:notes": "electron test/app/notes.electron.js",
+    "test:reorder": "electron test/app/reorder.electron.js",
     "build": "electron-builder --mac --dir",
     "install-app": "npm run build && rm -rf /Applications/Blob.app && cp -R dist/mac-arm64/Blob.app /Applications/Blob.app && echo 'Installed /Applications/Blob.app'",
-    "verify": "npm test && npm run test:app && npm run test:ui && npm run test:notes",
+    "verify": "npm test && npm run test:app && npm run test:ui && npm run test:notes && npm run test:reorder",
     "verify:packaged": "sh scripts/verify-packaged.sh"
   },
   "build": {

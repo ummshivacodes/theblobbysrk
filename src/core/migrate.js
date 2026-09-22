@@ -1,12 +1,17 @@
 // migrate(saved) -> state v2: the gate every loaded threads.json passes through.
 // Its promises, each pinned by a unit test:
 //   - total: it never throws, whatever it is given;
-//   - lossless: every plain-object item survives with all its fields (unknown
-//     ones included); nothing is dropped, invented, renumbered or re-statused;
+//   - lossless: every plain-object item survives with all its EXISTING fields (unknown ones included);
+//     nothing already there is dropped, invented out of nothing, renumbered or re-statused. Structural
+//     completeness that was never a meaningful fact about the item is a different thing: `stats`/`history`
+//     are seeded whole when absent (seedStats/seedHistory), and a note's manual `order` is seeded the same
+//     way the first time a file needs one (seedNoteOrder) — filling in "where does this sort", not changing
+//     anything the file already said about the item;
 //   - isolated: the result shares no memory with the input, and the input is
 //     never touched;
 //   - idempotent: migrating a migrated state changes nothing.
 import { toHistory } from './history.js';
+import { isNote, newestEditFirst } from './naturalOrder.js';
 
 const SCHEMA_VERSION = 2;
 
@@ -47,13 +52,26 @@ const seedStats = (threads) => ({
 // Files from before the history list existed: seed it from the done rows.
 const seedHistory = (threads) => threads.filter((t) => t.status === 'done').map(toHistory);
 
+// Notes get a manual order (drag-and-drop) the first time a file needs one. If every note already has a
+// finite numeric `order`, they are left exactly as they are — including relative to each other, so a
+// second migrate() changes nothing (idempotent). Otherwise the WHOLE notes group is renumbered 0, 1, 2, …
+// in today's order (newest-edited-first), so loading an old file — or one with only some notes numbered,
+// which normal use of this app can never produce — changes nothing anyone SEES until they actually drag a
+// note. Tasks don't get one yet: the task list isn't reorderable (see docs/REORDER-PLAN.md).
+function seedNoteOrder(threads) {
+  const notes = threads.filter(isNote);
+  if (notes.every((t) => Number.isFinite(t.order))) return threads;
+  const rankedIds = [...notes].sort(newestEditFirst).map((t) => t.id);
+  return threads.map((t) => (isNote(t) ? { ...t, order: rankedIds.indexOf(t.id) } : t));
+}
+
 export function migrate(saved) {
   const data = snapshot(saved);
   if (!isPlainObject(data) || !Array.isArray(data.threads)) return emptyState();
 
   const { version, threads: allEntries, stats, history, ...unknown } = data;
   // Junk entries (null, numbers, strings, arrays) are the only thing dropped.
-  const threads = allEntries.filter(isPlainObject);
+  const threads = seedNoteOrder(allEntries.filter(isPlainObject));
 
   return {
     // A newer app's version is never lowered, or it would migrate its own file again.

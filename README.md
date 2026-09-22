@@ -74,11 +74,14 @@ npm start
 - **Right-click a row → Delete** removes a task for good. Bars have no
   right-click.
 - **The header's N** opens your notes: a search box (every word has to match,
-  in the title or the notes), the most recently edited first, each with a
-  preview of its notes and when you last edited it. Click a note's title (or its
-  ▸) to read or edit it. **↩** sends a note back to the task dump as an untagged
-  task; right-click → Delete removes it. The box at the bottom takes a new note
-  (Enter saves it). Esc, or the N again, returns to the main screen.
+  in the title or the notes), most recently edited first — or however you last
+  dragged them: hover a note and a grip (⠿) appears at its end; drag it up or
+  down to put it wherever you want, and that becomes the order from then on
+  (editing a note no longer moves it, the same way tagging a task doesn't move
+  it on the axis). Dragging is off while you're searching. Click a note's title
+  (or its ▸) to read or edit it. **↩** sends a note back to the task dump as an
+  untagged task; right-click → Delete removes it. The box at the bottom takes a
+  new note (Enter saves it). Esc, or the N again, returns to the main screen.
 - **Links** (`http://`, `https://` or `www.`) in a title or in a row's notes are
   clickable and open in your default browser (Enter on a focused link works
   too). Only web addresses count: `javascript:`, `file:`, `mailto:` and bare
@@ -115,8 +118,9 @@ npm start
 - **⚙ (left of – and ×)** flips the panel to a second screen: the big
   crossed-off count, every task ever closed (kept in `threads.json` under
   `history`, so it survives deleting the row; reopening removes it), and
-  Settings — currently just Launch at login. Esc or "← back" returns;
-  collapsing the panel always lands back on the main screen.
+  Settings — currently just Launch at login, with a small "Blob — made by
+  SRK" credit under it. Esc or "← back" returns; collapsing the panel always
+  lands back on the main screen.
 
 Change the hotkey by editing `HOTKEY` at the top of `main.js`.
 
@@ -128,7 +132,7 @@ step: `index.html` loads one entry point, `src/ui/app.js`.
 |---|---|---|
 | `src/core/` | Pure logic. `itemStore.js`: the item state machine — tasks (`addTask`, `tagTask`, `dispatchToAxis`, `recallToDump`, `resolveThread`, `reopenTask`) and notes (`addNote`, `fileAsNote`, `unfileNote`, `setBody`, `setText`, `setLinkTitle`), plus `deleteItem` and `toggleFocus` for either. `selectors.js` (including `displayTitle`: how an item's title reads, e.g. a link as its page title), `capture.js`, `linkify.js`, `migrate.js` (schema v2). No DOM, no Electron, no I/O: persistence and the change callback are injected. It runs in plain Node, which is where it is tested, and a phone app could reuse it unchanged. The UI calls `setBody` (the notes editor), `addNote` (⌘↵, the Notes screen's box), `fileAsNote` (the N dot) and `unfileNote` (↩); links (`setLinkTitle`, `setText`) arrive with the rest of Phase 4. | only other `src/core/` files |
 | `src/ui/views/` | One file per thing on screen: `orbView`, `axisView`, `inboxView`, `scoreView`, `doneView`, plus `itemRow` (one row), `bodyEditor` (an item's notes: read text ↔ textarea), `titleEditor` (renaming a title), `notesView` (the Notes screen) and `notesBadgeView` (the header's N and its count). A view is `createXView(elements, actions)` returning `{ render(snapshot, ui), applyHover?(id) }`. It draws from a **frozen snapshot** and reports what the user did through `actions`. It can't reach the store or the bridge. | `ui/dom`, `ui/theme`, `ui/format`, `views/itemRow`, `views/bodyEditor`, `views/titleEditor`, `core/selectors`, `core/linkify` |
-| `src/ui/` | The page's machinery, one job per file: `bridge` (the only file that reads `window.threadAxis`), `snapshot`, `hover`, `panel` (fold-out animation + window sizing), `renderGate` (holds a redraw while the user is mid-gesture), `pressGuard` (a press on a button doesn't pull focus out of an open editor), `captureBox` (what a key in the capture box means: Enter, ⌘↵, several lines, input methods; a pure function, unit-tested), `linkTitles` (asks for a captured link's page title, fire and forget, unit-tested with fakes), `screens` (main / Notes / ⚙), `notice` (the notice bar), `tooltip`, `rowMenu`, `dom`, `format`, `theme`. | each other, sparingly |
+| `src/ui/` | The page's machinery, one job per file: `bridge` (the only file that reads `window.threadAxis`), `snapshot`, `hover`, `panel` (fold-out animation + window sizing), `renderGate` (holds a redraw while the user is mid-gesture), `pressGuard` (a press on a button doesn't pull focus out of an open editor), `dragList` (pointer-based drag-to-reorder for a list — plain pointer events, not the browser's native drag-and-drop, so it shares the render gate and press guard's machinery instead of running a second gesture system beside them), `captureBox` (what a key in the capture box means: Enter, ⌘↵, several lines, input methods; a pure function, unit-tested), `linkTitles` (asks for a captured link's page title, fire and forget, unit-tested with fakes), `screens` (main / Notes / ⚙), `notice` (the notice bar), `tooltip`, `rowMenu`, `dom`, `format`, `theme`. | each other, sparingly |
 | `src/ui/app.js` | The composition root. Looks up the page's elements (the only file that knows the ids in `index.html`), creates the store and the views, and hands each only the elements and actions it needs. | everything in `src/` |
 | `style.css`, `styles/` | Styling. `style.css` is the original; each new feature adds a file under `styles/` (loaded after it by `index.html`) instead of growing it. | – |
 | `preload.js` | The only bridge between the page and Electron (IPC): `window.threadAxis`. | Electron |
@@ -287,6 +291,20 @@ ignores them). Both made timing checks fail at random. Input the test injects go
 straight to the page, so it is unaffected. Don't loop it: one run per change.
 
 ```
+npm run test:reorder
+```
+Drag-and-drop reordering on the Notes screen (`docs/REORDER-PLAN.md`), the same way: a sealed,
+self-contained window, real (trusted) pointer events for the drag itself (a synthetic click cannot
+reproduce a real gesture's timing, which is exactly what this feature's riskiest edge case turns on).
+It drags past every row it needs to (not straight to the final point, so the reordering logic sees
+every position along the way, the same as a hand on a mouse would), and it holds one drag open past
+5 seconds while a different note is being typed into, to prove the drag does not depend on the
+click-safety timeout the render gate also uses for an unrelated reason. Coordinates are read a frame
+after anything that could have just changed the layout (typing into a row, expanding one) — reading
+them immediately once raced Chromium's own layout pass while this file was being written, which looked
+exactly like a dropped event until it was traced.
+
+```
 npm run test:app
 ```
 The Electron-level check for `main.js`. It boots the real main process, then
@@ -302,8 +320,8 @@ fixture data and their own profile (see
 run while Blob is open.
 
 ```
-npm run verify            # everything: unit + test:app + test:ui + test:notes
-npm run verify:packaged   # the three Electron tests against the code inside the BUILT app.asar
+npm run verify            # everything: unit + test:app + test:ui + test:notes + test:reorder
+npm run verify:packaged   # the four Electron tests against the code inside the BUILT app.asar
 ```
 `verify:packaged` (after `npm run build`) is what catches a file missing from
 the package while `npm start` still works: run it before every install.

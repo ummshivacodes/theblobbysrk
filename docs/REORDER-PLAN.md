@@ -1,13 +1,15 @@
 # Blob: a credit line + drag-to-reorder — implementation plan
 
-Status: **not started — written for the owner to review/edit before anyone implements it.**
+Status: **all three phases (A, B, C) done and committed. The credit line and drag-to-reorder are both live on branch `notes-reorder`, not yet merged into `main`.**
 Written 2026-09-22, after Phase 5 (the notes UI) shipped. Two independent, differently-sized asks:
 
 1. A one-line credit in the panel: **"Blob — made by SRK."** Presentational only; no plan needed
    beyond where it goes (§5). Do it whenever, in the same commit as this plan's first phase or on its own.
-2. **Drag-and-drop reordering**, up or down, in the two vertical lists (the task list, the Notes list).
-   This is the real feature this plan is for: it needs a data-model change, a new store transition, and a
-   new interaction that has to cooperate with machinery already built for a related reason (§2, §3).
+2. **Drag-and-drop reordering**, up or down, in the **Notes list only** — the owner scoped this down from
+   "both lists" when asked ("go ahead, notes only"). The task list is unaffected: no `order` field, no
+   drag handle, `inboxItems()`'s sort is untouched. Everything below that talked about the inbox group is
+   kept as written (a record of the reasoning and a seam for later — see §9), but nothing under Phase B or
+   C touches it.
 
 Out of scope, stated up front so it's easy to correct: the **axis** is not reorderable by dragging. It's a
 computed horizontal layout, not a list with an up/down order, and "up or down" in the ask doesn't fit it.
@@ -54,18 +56,22 @@ Item = {
   inbox; newest-edited-first for notes). So loading an old file changes nothing anyone sees until they actually
   drag something — the same "a phase that touches the schema changes no behaviour" discipline the notes plan
   used for its own Phases 0–2.
-  - This needs the exact grouping/sort rules `selectors.js` already has (`isNote`, `byCreatedAsc`,
-    `newestEditFirst`), and `migrate.js` must not reimplement them a second time — that's the two-places-one-
-    rule cross wire the standing rule exists to catch. **New tiny core file, `src/core/naturalOrder.js`**,
-    exports `isNote`, `byCreatedAsc`, `newestEditFirst`; `selectors.js` is refactored to import them instead of
-    keeping its own private copies (a no-behaviour-change refactor, its own commit, gated by the existing
+  - This needs the exact grouping/sort rules `selectors.js` already has (`isNote`, `newestEditFirst`), and
+    `migrate.js` must not reimplement them a second time — that's the two-places-one-rule cross wire the
+    standing rule exists to catch. **New tiny core file, `src/core/naturalOrder.js`**, exports `isNote`,
+    `newestEditFirst` (not `byCreatedAsc` too, as an earlier draft of this line said: only the notes-only scope
+    needs backfilling right now, so `byCreatedAsc` — used only by `inboxItems`, which this plan never touches —
+    stays private to `selectors.js`; a reviewer audit checked this deliberately, not just noted the mismatch).
+    `selectors.js` is refactored to import the two it needs instead of keeping its own private copies of THOSE
+    (a no-behaviour-change refactor, its own commit, gated by the existing
     selectors tests staying green with zero changes); `migrate.js` imports the same ones for the backfill.
-- **A new item gets the end of its group**, same as today's implicit "new things go at the bottom" via
-  `createdAt`: `order = 1 + max(existing orders in that group, defaulting to -1)`. `addTask`, `addNote`,
-  `unfileNote` (dump → task again) all need this; `fileAsNote` doesn't assign one (a task becoming a note picks
-  up notes' ordering only once it's actually placed among them by a drag, or by the migration-style backfill
-  rule above if it's simplest to apply the same "assign on first read" logic instead of on every transition —
-  worth deciding in the implementing phase, not this plan).
+- **A new note gets the position a fresh note always had: the top.** Corrected during implementation — the
+  plan's first draft said "the end of the group", copying the INBOX list's convention (new task = bottom, since
+  that list sorts oldest-created-first). Notes sort newest-edited-first by default, so a brand-new note has
+  always appeared at the top; keeping that on `addNote` and `fileAsNote` means the switch to manual order is
+  truly invisible until you drag something, exactly as intended. Concretely: `order = min(existing note
+  orders, defaulting to 0) - 1`. `unfileNote` (note → task) drops `order` entirely — it means nothing outside
+  the notes group, the same way `fileAsNote` already drops `quad` when a task becomes a note.
 
 ## 3. The store: one new transition
 
@@ -80,19 +86,22 @@ Guarded like every other transition (a bad call is a no-op, no save, no redraw):
   the full current list in hand anyway, since it just finished dragging within it.)
 - On success: `order = index` for each id in the given sequence, one `commit()` (one save, one redraw) — same
   shape as every other mutator in `itemStore.js`.
-- Unit-tested the same way the rest of the store is: the happy path, a stale/mismatched id set, a mixed group,
-  a duplicate id, an empty array, a single-item no-op, and that a mutation-tested guard actually rejects what
-  it says it rejects.
+- Unit-tested the same way the rest of the store is: the happy path (and its exact reverse), a stale/mismatched
+  id set (in particular a note deleted mid-drag — the drop handler's captured list is now stale, and must be
+  rejected rather than half-applied), an id belonging to a task, a duplicate id, and an empty array (a true
+  no-op: "reorder nothing" is not a move) — each confirmed by a mutation test that the guard it targets is
+  actually load-bearing.
 
 `selectors.js`'s `inboxItems`/`notes` sort by `order` ascending (falling back to today's comparator — `byCreatedAsc` /
 `newestEditFirst` — for the tie-break, and for any item that somehow still lacks one, which should only ever be
 possible for a moment before a group's first-ever backfill).
 
-**Open question for the owner, not blocking the plan, worth a line when you read this:** today `notes()` is
-"newest edited first" — a genuinely useful auto-surfacing behaviour. Once you drag anything, that group's order
-becomes manual and stays manual (editing a note no longer moves it) — dragging is a deliberate act and should
-stick, the same way tagging a task doesn't auto-move it on the axis. If you'd rather keep notes auto-sorted by
-recency and only make the **task list** draggable, say so and this plan drops the notes half of §5/§6.
+**Decided:** notes only (see the top of this plan). `notes()`'s "newest edited first" default now only applies
+until the first drag — after that, order is manual and sticky (editing a note no longer moves it), the same way
+tagging a task doesn't auto-move it on the axis. Confirmed in Phase B: the Phase 4 notes test had one assertion
+that assumed the old behaviour ("editing a note moves it to the top"); it now asserts the opposite, with a
+comment explaining why — the same kind of deliberate, documented change `ui.electron.js` got exactly once for
+the `version` field.
 
 ## 4. The render gate and press guard need one more "is something going on" signal
 
@@ -147,8 +156,11 @@ styles/notes.css (or a        the handle, the lifted-row look, the placeholder �
   new styles/reorder.css)     file-per-feature convention as notes.css itself
 index.html                   the credit line, in the ⚙ screen, after the "Toggle Blob ⌘⇧Y" row:
                               <div class="credit">Blob — made by SRK</div>
-test/unit/naturalOrder.test.mjs, an extended itemStore.test.mjs (reorderItems), an extended migrate test
-  (backfill), an extended selectors test (sorts by order once present)
+An extended itemStore.test.mjs (reorderItems), an extended migrate test (the backfill), an extended
+  selectors test (sorts by order once present) — as built, isNote/newestEditFirst's behaviour is exercised
+  thoroughly through those two (ties, non-finite order, the fallback), not through a dedicated
+  naturalOrder.test.mjs of its own; nothing is untested, just no separate file for it (a reviewer audit
+  checked this deliberately: every case the plan wanted covered has an assertion, just not filed here)
 test/app/reorder.electron.js  NEW (own file, so ui.electron.js and notes.electron.js both stay exactly as they
                               are). npm run test:reorder; verify and verify:packaged grow to include it, same
                               as test:notes was threaded in for Phase 4.
@@ -188,4 +200,55 @@ it is not a thing (only `app.js` constructs and wires it, exactly like the rende
 
 ## 10. Progress log
 
-Nothing implemented yet. Fill in here as phases land, the same way `docs/NOTES-PLAN.md` §11 does.
+**2026-09-22**
+- **Phase A done:** the `.credit` line in the ⚙ screen (`styles/credit.css`, its own tiny file — not `style.css`,
+  which stays the original screen's styles, and not `notes.css`, which isn't what this is either). One check
+  added to `test/app/notes.electron.js`.
+- **Phase B done** (branch `notes-reorder`): `naturalOrder.js` extracted from `selectors.js` (no-behaviour-change,
+  confirmed by the existing selectors/migrate tests passing unchanged before any new behaviour was added);
+  `migrate.js`'s `seedNoteOrder` backfill; `selectors.js`'s `notes()` sorts by manual order with a
+  newest-edited-first fallback; `itemStore.js` gains `reorderItems` (guarded, mutation-tested) and assigns/drops
+  `order` on `addNote`/`fileAsNote`/`unfileNote`. `npm run verify` green (1,108 unit tests; both Phase-0 and Phase
+  4 Electron tests green — the latter with two deliberate, documented changes: editing a note no longer reorders
+  the list, and `order` is a known field). Corrected while implementing: a new note lands at the TOP of the
+  group (matching what "newest edited first" always did for a fresh note), not the bottom — the plan's first
+  draft got this backwards by copying the (unbuilt) inbox list's convention; see §2.
+- **Phase C done: the drag UI.** `src/ui/dragList.js` — plain pointer events (pointerdown/move/up/cancel), not the
+  browser's native drag-and-drop, so it shares the render gate and press guard instead of running a second gesture
+  system beside them. It is constructed and owned by `app.js`, watching the Notes list's container directly — NOT
+  imported by `notesView.js`. The first attempt had it the other way round, and the architecture test's R2 rule
+  (views may import only the allow-listed files) correctly rejected it: `dragList` is cross-cutting app machinery
+  like `panel`/`renderGate`/`pressGuard`, not a view's own sibling module like `bodyEditor`/`titleEditor`. The gate's
+  5 s click-safety cap (§1/§4) does NOT protect a drag — `noteDrag.isDragging()` is a separate, uncapped signal, and
+  the test holds a drag open for 5.6 s to prove it. `test/app/reorder.electron.js` + `npm run test:reorder`, threaded
+  into `verify`/`verify:packaged`. Building the test surfaced a real, general testing gotcha, now in
+  `docs/NOTES-PLAN.md` §11 point 10 (a `getBoundingClientRect()` read racing Chromium's own layout pass right after
+  something else changed the DOM) — not a bug in the app, but worth any future test knowing about.
+- **The "rename can repaint from a stale snapshot" question from the Phase 5 review — chased after all, and fixed.**
+  The first draft of this section said a real single-pointer drag can't coincide with a click on a different row
+  (true, but not the whole story) and called this "even less reachable" than the original finding — **wrong**, and
+  a reviewer audit (2026-09-22) caught it by tracing the actual code, not by re-running the reasoning: `dragList.js`'s
+  keydown handler only intercepts `Escape`, so an **Enter** key press — one hand on the mouse dragging, the other on
+  the keyboard ending an *already-open* rename on a different row, an entirely ordinary two-handed action — reaches
+  `titleEditor.js`'s own handler unimpeded, blurs, and calls `notesView.js`'s `endRename` → the same ungated local
+  `redraw()` → `list.innerHTML = ''`, wiping the container the drag is actively moving a row inside of. Confirmed
+  reachable, not speculative, so fixed rather than logged:
+  - `dragList.js` exports `DRAG_ENDED` and fires it (bubbling, on `container`) whenever a drag finishes — committed,
+    cancelled, or force-cancelled — after `.dragging` is already removed. It also gained `cancel()`: end a drag right
+    now, no commit, same as Esc.
+  - `notesView.js`'s `redraw()` (used by `toggleExpand`/`startRename`/`endRename`, and now the search box's own input
+    handler too, which had the identical exposure — typing in an already-focused search box while dragging is just as
+    ordinary) skips the actual repaint while any row in the list is `.dragging`, remembering to. `flushIfPending()`,
+    called by `app.js` on `DRAG_ENDED`, catches up the moment it's safe. No new import into the view: it's a DOM class
+    check, the same shape as `isEditingIn`, not a dependency on `dragList.js`.
+  - The audit also flagged, lower confidence (code alone couldn't confirm it): the global hotkey hides the window
+    regardless of focus, hits the identical blur-triggered path, and — if Electron doesn't fire `pointercancel` on
+    hide on its own — could leave `noteDrag.isDragging()` stuck true forever, freezing the render gate. Rather than
+    find out empirically, `app.js`'s `onHidden` now calls `noteDrag.cancel()` before collapsing, unconditionally: the
+    render gate can never depend on unverified browser behaviour for its own liveness.
+  - Two new `test/app/reorder.electron.js` sections: the Enter-ends-a-different-rename-mid-drag race (checks the drag
+    is undisturbed — still marked dragging — at the moment of the collision, and that both changes land correctly
+    once it resolves), and hiding the window mid-drag (checks the drag is cancelled, not stuck, and that a fresh drag
+    afterwards still works — nothing about the gate stayed "held").
+- **Not merged into `main` yet.** `npm run verify` green throughout (1,108 unit tests; all four Electron suites).
+

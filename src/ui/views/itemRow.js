@@ -12,6 +12,8 @@ import { createTitleEditor } from './titleEditor.js';
 //   { tag(id, q), startRetag(id), push(id), recall(id), resolve(id), reopen(id), focus(id),
 //     hover(id | null), menu(x, y, item), toggleExpand(id), saveBody(id, body), fileNote(id), unfile(id), openLink(href),
 //     startRename(id), endRename(), rename(id, text) }
+// A `reorderable` row also gets a `.drag-handle`, which a list-level drag controller (ui/dragList.js)
+// reads directly — dragging is not a per-row action, so it is not part of `handlers`.
 
 // A round action button; clicking it must not also count as a click on the row.
 function actionButton(className, text, title, run) {
@@ -109,8 +111,19 @@ function noteMeta(item, expanded) {
   return meta;
 }
 
-// opts = { retagging: boolean, fresh: boolean, expanded: boolean, autofocusBody: boolean, renaming: boolean, handlers }
-export function buildRow(item, { retagging, fresh, expanded = false, autofocusBody = false, renaming = false, handlers }) {
+// A grip for ui/dragList.js to pick up (it reads the DOM directly, not through `handlers` — see the note
+// at the top of this file). preventDefault on mousedown keeps a drag from also starting a text selection.
+function dragHandle() {
+  return el('button', {
+    className: 'drag-handle',
+    text: '⠿',
+    title: 'Drag to reorder',
+    attrs: { tabindex: -1 }, // a mouse/trackpad affordance; the row's own controls carry keyboard focus
+  });
+}
+
+// opts = { retagging, fresh, expanded, autofocusBody, renaming, reorderable: boolean, handlers }
+export function buildRow(item, { retagging, fresh, expanded = false, autofocusBody = false, renaming = false, reorderable = false, handlers }) {
   const row = el('div', { className: 'task-row', dataset: { id: item.id } });
   if (item.focused) row.classList.add('focused');
   if (item.status === 'resolving') row.classList.add('resolving');
@@ -161,6 +174,7 @@ export function buildRow(item, { retagging, fresh, expanded = false, autofocusBo
 
   if (item.status !== 'note') row.appendChild(tagControl(item, retagging, handlers));
   actionButtons(item, handlers).forEach((button) => row.appendChild(button));
+  if (reorderable) row.appendChild(dragHandle());
   if (item.status === 'note') row.appendChild(noteMeta(item, expanded));
 
   if (expanded) {

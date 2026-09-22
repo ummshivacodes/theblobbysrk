@@ -125,6 +125,38 @@ describe('notes', () => {
   it('is empty when there are no notes', () => {
     assert.deepEqual(notes(stateOf(item('a', 'axis', 1), item('d', 'dump', 2))), []);
   });
+
+  it('once notes have a manual order (drag-and-drop), it wins over recency, however out of time order it is', () => {
+    const state = stateOf(
+      item('n1', 'note', 10, { updatedAt: 500, order: 2 }), // most recently edited, but ordered last
+      item('n2', 'note', 20, { updatedAt: 100, order: 0 }), // edited longest ago, but ordered first
+      item('n3', 'note', 30, { updatedAt: 300, order: 1 }),
+    );
+    assert.deepEqual(ids(notes(state)), ['n2', 'n3', 'n1']);
+  });
+
+  it('a note with an order always sorts before one without, whatever their times say', () => {
+    const state = stateOf(
+      item('unordered', 'note', 10, { updatedAt: 999 }), // no order: would otherwise sort first
+      item('ordered', 'note', 20, { updatedAt: 1, order: 0 }),
+    );
+    assert.deepEqual(ids(notes(state)), ['ordered', 'unordered']);
+  });
+
+  it('among notes that all lack an order, falls back to newest-edited-first, exactly as before this feature', () => {
+    const state = stateOf(item('old', 'note', 10, { updatedAt: 10 }), item('new', 'note', 20, { updatedAt: 20 }));
+    assert.deepEqual(ids(notes(state)), ['new', 'old']);
+  });
+
+  it('a non-finite order (NaN, a string, Infinity) is treated as no order at all, not as a sort key', () => {
+    const state = stateOf(
+      item('a', 'note', 10, { order: NaN }),
+      item('b', 'note', 20, { order: '1' }),
+      item('c', 'note', 30, { order: 0 }),
+    );
+    // c has the only real order, so it goes first; a and b (both order-less) fall back to newest-edited-first.
+    assert.deepEqual(ids(notes(state)), ['c', 'b', 'a']);
+  });
 });
 
 describe('searchNotes', () => {

@@ -14,3 +14,4 @@ echo "Testing the packaged sources: $BLOB_MAIN"
 npm run test:app
 npm run test:ui
 npm run test:notes
+npm run test:reorder
