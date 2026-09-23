@@ -1,3 +1,24 @@
+import { DONE_VISIBLE_MS } from '../core/selectors.js';
+
+// The last stretch of DONE_VISIBLE_MS: a done row fades instead of just vanishing when the sweep in
+// ui/app.js next redraws past the cutoff. Presentation-only (selectors.js stays free of it, same
+// reasoning as theme.js's colours) — only how long the fade itself takes. Exported: itemRow.js needs
+// the same number to size the CSS animation it drives from doneFadeMultiplier's result (see there for
+// why this has to be a real animation rather than a transition).
+export const DONE_FADE_MS = 4 * 1000;
+
+// 1 while a done item is comfortably inside its visible window, ramping linearly down to 0 as it nears
+// DONE_VISIBLE_MS. itemRow.js turns this into the row's fade-out animation timing. `now` is a
+// parameter, as below, so it is testable without a clock or without waiting DONE_VISIBLE_MS for real.
+// Same fail-safe as visibleInbox: a missing/non-finite doneAt reads as "not fading" rather than NaN
+// propagating into a CSS value.
+export function doneFadeMultiplier(item, now = Date.now()) {
+  if (item.status !== 'done' || !Number.isFinite(item.doneAt)) return 1;
+  const remaining = DONE_VISIBLE_MS - (now - item.doneAt);
+  if (remaining >= DONE_FADE_MS) return 1;
+  return Math.max(0, remaining) / DONE_FADE_MS;
+}
+
 // Human-readable timestamps for the ⚙ screen. `now` is a parameter so the function is testable
 // without a clock.
 export function fmtWhen(ts, now = new Date()) {

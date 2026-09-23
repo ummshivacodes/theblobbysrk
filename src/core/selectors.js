@@ -42,6 +42,24 @@ export function inboxItems(state) {
     .sort(byCreatedAsc);
 }
 
+// How long a crossed-off item stays in the main list before dropping out of it. It is never deleted —
+// history (and so doneView.js, the ⚙ screen) keeps it forever regardless — this is only about not
+// letting the working list fill up with things that are already finished.
+export const DONE_VISIBLE_MS = 30 * 1000;
+
+// inboxItems, minus a done item once DONE_VISIBLE_MS has passed since it was crossed off. `now` is a
+// parameter (as elsewhere — see ui/format.js's fmtAgo) so this is testable without a clock: recomputed
+// from `doneAt` on every call rather than driven by a one-shot timer, so it is still correct after the
+// app was quit and relaunched with the window already (partly) elapsed, which a timer would forget.
+// A done item with no usable `doneAt` (should never happen through the app itself — every guarded
+// transition that sets status:'done' sets it in the same breath — but a hand-edited or damaged file
+// could) stays visible rather than vanishing forever: the failure mode for "can't tell how old this
+// is" must be the same as "not old", not an item that's still on disk but unreachable from any screen.
+export function visibleInbox(state, now = Date.now()) {
+  return inboxItems(state).filter((t) =>
+    t.status !== 'done' || !Number.isFinite(t.doneAt) || now - t.doneAt < DONE_VISIBLE_MS);
+}
+
 // The Notes screen: notes only, in the order the owner put them in (drag-and-drop). Before a file has ever
 // been through migrate() with the reorder feature present, or for a note that somehow still lacks an
 // `order`, falls back to newest-edited-first — see byManualOrder.

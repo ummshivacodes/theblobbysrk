@@ -1,4 +1,4 @@
-import { inboxItems } from '../../core/selectors.js';
+import { visibleInbox } from '../../core/selectors.js';
 import { createOpenBodies, isEditingIn } from './bodyEditor.js';
 import { buildRow } from './itemRow.js';
 import { createRename } from './titleEditor.js';
@@ -48,7 +48,7 @@ export function createInboxView({ list, count }, actions) {
   function render(snapshot, ui) {
     // freshId is a one-render highlight; a later redraw of this list alone must not repeat it.
     last = { snapshot, ui: { ...ui, freshId: null } };
-    const items = inboxItems(snapshot);
+    const items = visibleInbox(snapshot);
     const present = new Set(items.map((item) => item.id));
     retagging.forEach((id) => { if (!present.has(id)) retagging.delete(id); });
     openBodies.prune(present);

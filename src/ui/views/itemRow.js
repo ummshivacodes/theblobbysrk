@@ -1,7 +1,7 @@
 import { linkify } from '../../core/linkify.js';
 import { displayTitle } from '../../core/selectors.js';
 import { el, renderSegments } from '../dom.js';
-import { firstLine, fmtAgo } from '../format.js';
+import { doneFadeMultiplier, DONE_FADE_MS, firstLine, fmtAgo } from '../format.js';
 import { COLORS } from '../theme.js';
 import { createBodyEditor } from './bodyEditor.js';
 import { createTitleEditor } from './titleEditor.js';
@@ -127,7 +127,25 @@ export function buildRow(item, { retagging, fresh, expanded = false, autofocusBo
   const row = el('div', { className: 'task-row', dataset: { id: item.id } });
   if (item.focused) row.classList.add('focused');
   if (item.status === 'resolving') row.classList.add('resolving');
-  if (item.status === 'done') row.classList.add('done');
+  if (item.status === 'done') {
+    row.classList.add('done');
+    // A CSS *transition* would need this exact row element to persist across renders to animate
+    // anything — it doesn't: inboxView.js rebuilds the whole list from scratch on every render,
+    // including every tick of app.js's sweep, so each "faded" row is a brand new node with no
+    // previous frame to interpolate from (nothing plays; see axisView.js's own <g>-keying for the
+    // same problem solved the other way, by keeping elements alive — not appropriate for a plain
+    // list). An *animation* with a negative delay sidesteps that: a negative animation-delay makes it
+    // start already-partway through its own timeline the instant this fresh node is created, so it
+    // paints at exactly the right opacity immediately, then keeps animating smoothly on the browser's
+    // own clock — independent of the sweep's 1s granularity — until the row is next rebuilt (near-
+    // identical delay, no visible seam) or the sweep excludes it from the list for good.
+    const fade = doneFadeMultiplier(item);
+    if (fade < 1) {
+      row.classList.add('fading');
+      row.style.animationDuration = `${DONE_FADE_MS}ms`;
+      row.style.animationDelay = `-${(1 - fade) * DONE_FADE_MS}ms`;
+    }
+  }
   if (fresh) row.classList.add('fresh');
   if (expanded) row.classList.add('expanded');
   row.addEventListener('contextmenu', (e) => {

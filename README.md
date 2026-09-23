@@ -69,11 +69,13 @@ npm start
 - **Close a thread** by clicking its bar or its row's ✓. Its bar leaves
   the axis immediately — closed work never crowds it — and the other bars
   spread into the room it leaves. The row stays in the list, struck
-  through with a ↺ to reopen it, until you delete it. New bars slide the
-  existing ones over to bundle in.
+  through with a ↺ to reopen it, for 30 seconds — fading over the last
+  few of them — then it drops out of the list on its own. New bars slide
+  the existing ones over to bundle in.
 - **Reopen a closed thread** with the ↺ on its row (or right-click →
-  Reopen). It goes straight back on the axis and the scoreboard gives the
-  point back.
+  Reopen) while it's still there, or any time after from ⚙'s crossed-off
+  list, which keeps every one forever and has its own ↺. Either way it
+  goes straight back on the axis and the scoreboard gives the point back.
 - **Right-click a row → Delete** removes a task for good. Bars have no
   right-click.
 - **The header's N** opens your notes: a search box (every word has to match,
@@ -316,6 +318,14 @@ have a real region instead of a percentage of a zero-size bounding box. Its own 
 `test:ui`'s, since these are deliberate behaviour changes.
 
 ```
+npm run test:donefade
+```
+A crossed-off task fading out of the main list of its own accord 30 seconds later, and reviving one
+from ⚙ afterwards. It doesn't wait the real 30 seconds: the page's own clock is fast-forwarded partway
+through, the same as if you'd left it running, but the sweep in `ui/app.js` still has to notice on its
+own next real tick rather than being told to — so a few real seconds pass, not thirty.
+
+```
 npm run test:app
 ```
 The Electron-level check for `main.js`. It boots the real main process, then
@@ -331,8 +341,8 @@ fixture data and their own profile (see
 run while Blob is open.
 
 ```
-npm run verify            # everything: unit + test:app + test:ui + test:notes + test:reorder + test:focus
-npm run verify:packaged   # the five Electron tests against the code inside the BUILT app.asar
+npm run verify            # everything: unit + test:app + test:ui + test:notes + test:reorder + test:focus + test:donefade
+npm run verify:packaged   # the six Electron tests against the code inside the BUILT app.asar
 ```
 `verify:packaged` (after `npm run build`) is what catches a file missing from
 the package while `npm start` still works: run it before every install.

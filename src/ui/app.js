@@ -144,6 +144,7 @@ const done = createDoneView(
     listCount: $('doneListCount'),
     loginToggle: $('loginToggle'),
   },
+  pick(actions, ['reopen']),
   { settings: bridge.settings },
 );
 const hover = createHover([orb, axis, inbox]);
@@ -177,6 +178,15 @@ const POINTER_HOLD_MAX_MS = 5000; // a press that never reports its release must
 let pointerDownAt = 0;
 const pointerHeld = () => pointerDownAt > 0 && Date.now() - pointerDownAt < POINTER_HOLD_MAX_MS;
 const gate = createRenderGate({ draw: drawAll, isHeld: () => pointerHeld() || busy() });
+
+// A done item fades out of the main list on its own, DONE_VISIBLE_MS after being crossed off (see
+// selectors.js) — nothing else in the app changes just because time passed, so this is the one thing
+// that needs a redraw nobody asked for. Reusing gate.request() rather than calling drawAll() directly
+// means a tick mid-drag or mid-edit is deferred exactly like any other change, not forced through it.
+// A plain always-on interval rather than only-while-something's-about-to-expire: the list here is a
+// handful of items, so a redraw every second is not worth the bookkeeping to avoid.
+const DONE_SWEEP_MS = 1000;
+setInterval(() => gate.request(), DONE_SWEEP_MS);
 
 // Any of these can be the end of a gesture: a held redraw may be due, and a postponed fold of the panel
 // (the mouse left while the user was typing). Both just ask again whether they are still held; the ones

@@ -216,7 +216,16 @@ body { display: flex; justify-content: flex-end; align-items: flex-start; }
 .task-row.focused { border-left-color: var(--gold); }
 .task-row.hovered { background: rgba(255, 255, 255, 0.1); }
 .task-text { cursor: pointer; }
-.task-row.resolving, .task-row.done { opacity: 0.45; }
+.task-row.resolving { opacity: 0.45; }
+.task-row.done { opacity: 0.45; }
+/* Only added in the last few seconds before a done row drops out of the list entirely (ui/app.js's
+   periodic sweep — see selectors.js's DONE_VISIBLE_MS); itemRow.js sizes the animation with a negative
+   delay so it starts already-partway through, at the right opacity, the moment this row is built. */
+.task-row.done.fading { animation: done-fade-out linear forwards; }
+@keyframes done-fade-out {
+  from { opacity: 0.45; }
+  to   { opacity: 0; }
+}
 .task-row.resolving .task-text, .task-row.done .task-text { text-decoration: line-through; cursor: default; }
 .tag-chip.static { cursor: default; opacity: 0.7; }
 .task-row.fresh { animation: pop-in 0.18s ease-out; }
@@ -283,6 +292,8 @@ body { display: flex; justify-content: flex-end; align-items: flex-start; }
 /* ↺ on a crossed-off row */
 .task-act.undo { opacity: 0.8; }
 .task-act.undo:hover { background: #4a86e8; color: #fff; opacity: 1; }
+.task-act:disabled { opacity: 0.35; cursor: not-allowed; }
+.task-act:disabled:hover { background: rgba(255, 255, 255, 0.08); color: #ddd; } /* no hover reaction at all */
 .task-row.done .task-act.undo { pointer-events: auto; }
 .row-menu button.reopen { color: #9cc4ff; }
 .row-menu button.reopen:hover { background: rgba(74, 134, 232, 0.25); color: #fff; }

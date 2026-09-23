@@ -16,3 +16,4 @@ npm run test:ui
 npm run test:notes
 npm run test:reorder
 npm run test:focus
+npm run test:donefade

@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { activeThreads, inboxItems, notes, searchNotes, noteCount } from '../../src/core/selectors.js';
+import { activeThreads, DONE_VISIBLE_MS, inboxItems, notes, searchNotes, noteCount, visibleInbox } from '../../src/core/selectors.js';
 
 // Invisible and look-alike characters, built from code points so they stay visible in review.
 const NBSP = String.fromCharCode(0xa0);
@@ -72,6 +72,48 @@ describe('inboxItems', () => {
   it('sorts an item with a missing or garbage createdAt as oldest, without upsetting the rest', () => {
     const state = stateOf(item('b', 'dump', 5), { id: 'a', status: 'dump' }, item('c', 'dump', NaN), item('d', 'dump', 1));
     assert.deepEqual(ids(inboxItems(state)), ['a', 'c', 'd', 'b']);
+  });
+});
+
+describe('visibleInbox', () => {
+  it('is inboxItems unchanged when nothing done is anywhere near the cutoff', () => {
+    const state = stateOf(item('d', 'dump', 1), item('a', 'axis', 2, { quad: 1 }), item('x', 'done', 3, { doneAt: 1000 }));
+    assert.deepEqual(ids(visibleInbox(state, 1000 + 1)), ids(inboxItems(state)));
+  });
+
+  it('still includes a done item one millisecond before its cutoff', () => {
+    const state = stateOf(item('x', 'done', 1, { doneAt: 1000 }));
+    assert.deepEqual(ids(visibleInbox(state, 1000 + DONE_VISIBLE_MS - 1)), ['x']);
+  });
+
+  it('drops a done item exactly at its cutoff, and past it', () => {
+    const state = stateOf(item('x', 'done', 1, { doneAt: 1000 }));
+    assert.deepEqual(visibleInbox(state, 1000 + DONE_VISIBLE_MS), []);
+    assert.deepEqual(visibleInbox(state, 1000 + DONE_VISIBLE_MS + 1), []);
+  });
+
+  it('never drops a dump, axis or resolving item, however large `now` is', () => {
+    const state = stateOf(item('d', 'dump', 1), item('a', 'axis', 2, { quad: 1 }), item('r', 'resolving', 3, { quad: 2 }));
+    assert.deepEqual(ids(visibleInbox(state, 1e15)), ['d', 'a', 'r']);
+  });
+
+  it('each done item keyed off its own doneAt, not a shared clock', () => {
+    const state = stateOf(item('old', 'done', 1, { doneAt: 0 }), item('new', 'done', 2, { doneAt: 100000 }));
+    assert.deepEqual(ids(visibleInbox(state, 100000 + 1)), ['new']);
+  });
+
+  it('defaults `now` to the real clock', () => {
+    const state = stateOf(item('x', 'done', 1, { doneAt: Date.now() }));
+    assert.deepEqual(ids(visibleInbox(state)), ['x']);
+  });
+
+  it('a done item with no usable doneAt stays visible rather than vanishing forever', () => {
+    // Should never happen through the app itself (every guarded transition sets doneAt in the same
+    // breath as status:'done') — this is the fail-safe for a hand-edited or damaged file.
+    const noDoneAt = stateOf(item('x', 'done', 1));
+    assert.deepEqual(ids(visibleInbox(noDoneAt, 1e15)), ['x']);
+    const garbage = stateOf(item('x', 'done', 1, { doneAt: 'not a number' }));
+    assert.deepEqual(ids(visibleInbox(garbage, 1e15)), ['x']);
   });
 });
 

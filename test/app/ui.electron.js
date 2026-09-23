@@ -15,6 +15,10 @@ const { waitFor, createReporter } = require('./harness.js');
 const T = 1700000000000;
 const COLOR = { 1: 'hsl(28, 100%, 54%)', 2: 'hsl(28, 68%, 40%)', 3: 'hsl(28, 45%, 27%)' };
 const NEW = 'a brand new thought';
+// 'finished thread' must still read as recently done for this whole run: unlike every other fixture
+// timestamp here, doneAt can't be a fixed point in the past any more — DONE_VISIBLE_MS (selectors.js)
+// would have already aged it out of the main list before the test even got to look at it.
+const DONE2_AT = Date.now();
 
 // One item of every status that can be saved (`resolving` only exists for 700 ms, so it is caught live).
 const ctx = bootIsolatedApp({
@@ -24,10 +28,10 @@ const ctx = bootIsolatedApp({
       { id: 'dump3', text: 'tagged dump item', quad: 3, status: 'dump', createdAt: T + 2 },
       { id: 'axis1', text: 'axis thread one', quad: 1, status: 'axis', createdAt: T + 3 },
       { id: 'axis2', text: 'axis thread two', quad: 2, status: 'axis', createdAt: T + 4 },
-      { id: 'done2', text: 'finished thread', quad: 2, status: 'done', createdAt: T + 5, doneAt: T + 6 },
+      { id: 'done2', text: 'finished thread', quad: 2, status: 'done', createdAt: T + 5, doneAt: DONE2_AT },
     ],
     stats: { listed: 5, done: 1 },
-    history: [{ id: 'done2', text: 'finished thread', quad: 2, createdAt: T + 5, doneAt: T + 6 }],
+    history: [{ id: 'done2', text: 'finished thread', quad: 2, createdAt: T + 5, doneAt: DONE2_AT }],
   },
 });
 const { app, BrowserWindow } = ctx;

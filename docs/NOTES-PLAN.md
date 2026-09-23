@@ -580,3 +580,52 @@ own focus-clearing. And `axisView.js`'s `groove` filter region relied on the lit
 SAME literal `10` in `ensureBase()`'s own line coordinates — safe today, but two independent numbers that
 happened to cancel out, one edit away from silently reintroducing the exact clipped-bar bug this pass just
 fixed. Given a name (`AX.inset`) and read from one place by both.
+
+**2026-09-22 night, amber priority colour + "by SRK" in both titles (commit `cf20194`, direct on `main`)**
+Post-dev-review feedback (not a plan): the Q1-Q4 axis/chip/core colours were four unrelated hues, which
+means reading one costs a lookup ("which colour was urgent?") before it costs a reaction. Replaced with
+one accent (amber) ramped by brightness — Q1 full-bright with a glow, Q2/Q3 dimmer, Q4 unchanged plain
+grey, off the ramp entirely — since a magnitude read is faster than a categorical one for things that are
+actually ranked. Deliberately not green: `.resolving`/`.task-act.done` already use green for "done" twice
+over, and warm-for-urgent still matches convention outside the app too. `theme.js`'s `COLORS` is the one
+place this lives, so every consumer (axis bars, chips/dots, ambient cores, done-history chips) picked it
+up untouched. "by SRK" added as small subtext next to "Blob" in both places that text appears on screen —
+the panel header and the tray tooltip (the latter plain text; a native OS tooltip can't carry the subtext
+styling). Small enough to skip a branch/worktree, but not a fresh-eyes audit substitute: caught by that
+pass, not before it, that a Phase-0 test's "nothing starts hovered, focused or struck" check needed `.q1`
+(now a permanent quad-identity class, not a transient state) added to its own ignore-list. `npm run verify`
+green: 1,109 unit tests, all five Electron suites.
+
+**2026-09-22 night, a crossed-off task fades out of the main list on its own (branch: none, direct on
+`main` — small, single-feature, not independently developed alongside anything else)**
+Owner's ask: 30 seconds after crossing a task off, it should stop cluttering the main list — but stay
+revivable "from the settings section" if it turns out to still be unfinished. Investigated with two
+parallel Explore agents first (one mapping the done-item lifecycle + `doneView.js`'s exact data source,
+one mapping existing timing/CSS-transition/time-based-test conventions) rather than reading serially —
+the first agent's report was thorough enough that the second call was never needed.
+
+That investigation surfaced something the request's own phrasing assumed was already true and wasn't:
+`doneView.js` (the ⚙ screen) was **read-only** — history, a timestamp, a static chip, no ↺ anywhere. The
+only existing revival path (the ↺ on a `#taskList` row, or its right-click "Reopen") lives on the row that
+this feature makes disappear. Shipping the fade alone would have made a task unrevivable forever once it
+aged out — worse than today, not better. Added a ↺ to each `doneView.js` history row (same class, same
+glyph, as the main list's) and threaded a `reopen` action into it from `app.js`, so this is where "go to
+the settings section and revive it" actually becomes true, not just a description of it.
+
+The fade itself: `DONE_VISIBLE_MS` (30s) and a new selector, `visibleInbox` — `inboxItems` filtered by
+`now - doneAt < DONE_VISIBLE_MS`, `now` a parameter (as `fmtAgo` already does) so it's testable without a
+clock and correct across a quit/relaunch (a one-shot timer, the `closing`-Map pattern `resolveThread`
+already uses for its 700ms beat, would be wrong here — it doesn't survive the app being closed, and 30s is
+long enough that it often would be open across one). `inboxItems` itself is untouched, so its own "includes
+every non-note status" test needed no change — `visibleInbox` wraps it rather than replacing it. A separate
+pure function in `ui/format.js` (core stays free of "how things look," same reasoning as `theme.js`),
+`doneFadeMultiplier`, ramps 1→0 over the last 4s before the cutoff; `itemRow.js` turns that into a `--fade`
+custom property, `style.css` into `opacity: calc(0.45 * var(--fade, 1))` with a transition, so nothing
+needs a `transitionend` handler or a "currently leaving" sub-state — a plain periodic re-render (`ui/app.js`,
+once a second, through the *same* `gate.request()` every other change already uses, so a tick mid-drag or
+mid-edit defers exactly like any other change would) recomputes the ramp and CSS smooths between ticks.
+
+Tested without waiting the real 30 seconds: `test/app/doneFade.electron.js` overrides the page's own
+`Date.now` partway through rather than shrinking any constant — the sweep still has to notice on its own
+next real tick, so a few real seconds pass, not thirty, while still exercising the actual production
+timing constant. `npm run test:donefade`; `npm run verify` covers it going forward.

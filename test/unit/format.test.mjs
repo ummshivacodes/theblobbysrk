@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fmtWhen, fmtAgo, firstLine } from '../../src/ui/format.js';
+import { doneFadeMultiplier, fmtWhen, fmtAgo, firstLine } from '../../src/ui/format.js';
+import { DONE_VISIBLE_MS } from '../../src/core/selectors.js';
 
 // Assertions avoid the exact clock format (12h/24h, am/pm) because it follows the machine's locale.
 const at = (y, m, d, h = 12, min = 0) => new Date(y, m - 1, d, h, min).getTime();
@@ -96,4 +97,33 @@ test('firstLine: long lines are cut with an ellipsis, exactly at the limit', () 
 
 test('firstLine: empty, blank and non-string input give an empty string', () => {
   for (const bad of ['', '   ', '\n\n', undefined, null, 42, {}]) assert.equal(firstLine(bad), '', String(bad));
+});
+
+test('doneFadeMultiplier: 1 for anything that is not done, regardless of doneAt', () => {
+  assert.equal(doneFadeMultiplier({ status: 'axis', doneAt: 0 }, 1e15), 1);
+  assert.equal(doneFadeMultiplier({ status: 'dump' }, 1e15), 1);
+});
+
+test('doneFadeMultiplier: 1 right after being crossed off, and for most of the visible window', () => {
+  const item = { status: 'done', doneAt: 1000 };
+  assert.equal(doneFadeMultiplier(item, 1000), 1);
+  assert.equal(doneFadeMultiplier(item, 1000 + DONE_VISIBLE_MS - 4000), 1); // right at the edge of the fade window
+});
+
+test('doneFadeMultiplier: ramps linearly to 0 across the last stretch, and clamps at the cutoff', () => {
+  const item = { status: 'done', doneAt: 1000 };
+  const halfway = doneFadeMultiplier(item, 1000 + DONE_VISIBLE_MS - 2000); // 2s of a 4s fade window left
+  assert.ok(halfway > 0.4 && halfway < 0.6, `expected roughly 0.5, got ${halfway}`);
+  assert.equal(doneFadeMultiplier(item, 1000 + DONE_VISIBLE_MS), 0);
+  assert.equal(doneFadeMultiplier(item, 1000 + DONE_VISIBLE_MS + 5000), 0); // long past: still 0, not negative
+});
+
+test('doneFadeMultiplier: defaults `now` to the real clock', () => {
+  assert.equal(doneFadeMultiplier({ status: 'done', doneAt: Date.now() }), 1);
+});
+
+test('doneFadeMultiplier: a missing or non-finite doneAt reads as "not fading" (1), not NaN', () => {
+  assert.equal(doneFadeMultiplier({ status: 'done' }, 1e15), 1);
+  assert.equal(doneFadeMultiplier({ status: 'done', doneAt: 'not a number' }, 1e15), 1);
+  assert.equal(doneFadeMultiplier({ status: 'done', doneAt: NaN }, 1e15), 1);
 });
