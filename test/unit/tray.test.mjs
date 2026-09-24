@@ -117,13 +117,27 @@ describe('createTray', () => {
 });
 
 describe('formatHotkey', () => {
-  test('writes an accelerator the way the menu shows it', () => {
-    assert.equal(formatHotkey('CommandOrControl+Shift+Y'), '⌘⇧Y');
+  test('on macOS, writes an accelerator the way the menu shows it', () => {
+    assert.equal(formatHotkey('CommandOrControl+Shift+Y', 'darwin'), '⌘⇧Y');
   });
 
-  test('leaves the parts it does not know alone', () => {
-    assert.equal(formatHotkey('Alt+K'), 'AltK');
-    assert.equal(formatHotkey('CommandOrControl+Alt+Shift+Space'), '⌘Alt⇧Space');
-    assert.equal(formatHotkey('F5'), 'F5');
+  test('on macOS, leaves the parts it does not know alone', () => {
+    assert.equal(formatHotkey('Alt+K', 'darwin'), 'AltK');
+    assert.equal(formatHotkey('CommandOrControl+Alt+Shift+Space', 'darwin'), '⌘Alt⇧Space');
+    assert.equal(formatHotkey('F5', 'darwin'), 'F5');
+  });
+
+  test('on Windows and Linux, spells out Ctrl instead of a Mac glyph, keeping the + separators', () => {
+    assert.equal(formatHotkey('CommandOrControl+Shift+Y', 'win32'), 'Ctrl+Shift+Y');
+    assert.equal(formatHotkey('CommandOrControl+Shift+Y', 'linux'), 'Ctrl+Shift+Y');
+  });
+
+  test('leaves an accelerator with no CommandOrControl alone on other platforms too', () => {
+    assert.equal(formatHotkey('Alt+K', 'win32'), 'Alt+K');
+    assert.equal(formatHotkey('F5', 'win32'), 'F5');
+  });
+
+  test('defaults to process.platform when none is passed', () => {
+    assert.equal(formatHotkey('CommandOrControl+Shift+Y'), formatHotkey('CommandOrControl+Shift+Y', process.platform));
   });
 });

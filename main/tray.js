@@ -2,9 +2,15 @@
 // and the four things the menu can ask for come in through the factory, so this
 // runs under test with fakes.
 
-// "CommandOrControl+Shift+Y" -> "⌘⇧Y", the way the menu shows it.
-function formatHotkey(accelerator) {
-  return accelerator.replace('CommandOrControl', '⌘').replace('Shift', '⇧').replace(/\+/g, '');
+// "CommandOrControl+Shift+Y" -> "⌘⇧Y" on macOS (the way the menu shows it), or "Ctrl+Shift+Y"
+// elsewhere: Windows and Linux have no single-glyph stand-in for Cmd, so the compact symbol
+// style would show a Mac key that does not exist on the tester's keyboard. platform is a
+// parameter, not read from process.platform directly, so this stays a pure, testable function.
+function formatHotkey(accelerator, platform = process.platform) {
+  if (platform === 'darwin') {
+    return accelerator.replace('CommandOrControl', '⌘').replace('Shift', '⇧').replace(/\+/g, '');
+  }
+  return accelerator.replace('CommandOrControl', 'Ctrl');
 }
 
 // Returns the Tray. The caller must keep it referenced: a Tray nothing points
